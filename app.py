@@ -3,25 +3,36 @@ from flask_cors import CORS
 import mysql.connector
 import os
 import requests
-from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# Load environment variables
-load_dotenv()
-
-# Create Flask app
+# -----------------------------
+# Create Flask App
+# -----------------------------
 app = Flask(__name__)
 CORS(app)
+
+# -----------------------------
+# Debug Route (Check Environment)
+# -----------------------------
+@app.route("/check-env")
+def check_env():
+    return {
+        "DB_HOST": os.getenv("DB_HOST"),
+        "DB_USER": os.getenv("DB_USER"),
+        "DB_NAME": os.getenv("DB_NAME"),
+        "DB_PORT": os.getenv("DB_PORT")
+    }
 
 # -----------------------------
 # Database Connection
 # -----------------------------
 def get_db_connection():
     return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="MySQL@123",  # Change if needed
-        database="mindease_db"
+        host=os.environ["DB_HOST"],
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        database=os.environ["DB_NAME"],
+        port=int(os.environ.get("DB_PORT", 3306))
     )
 
 # -----------------------------
@@ -32,7 +43,7 @@ def home():
     return "MindEase Backend Running Successfully 🚀"
 
 # -----------------------------
-# REGISTER API (SECURE)
+# REGISTER API
 # -----------------------------
 @app.route("/register", methods=["POST"])
 def register():
@@ -46,7 +57,6 @@ def register():
         if not name or not email or not password:
             return jsonify({"error": "All fields are required"}), 400
 
-        # 🔐 Hash password before saving
         hashed_password = generate_password_hash(password)
 
         connection = get_db_connection()
@@ -66,7 +76,7 @@ def register():
 
 
 # -----------------------------
-# LOGIN API (SECURE)
+# LOGIN API
 # -----------------------------
 @app.route("/login", methods=["POST"])
 def login():
@@ -82,7 +92,6 @@ def login():
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        # Get user by email ONLY
         query = "SELECT * FROM users WHERE email=%s"
         cursor.execute(query, (email,))
         user = cursor.fetchone()
@@ -90,7 +99,6 @@ def login():
         cursor.close()
         connection.close()
 
-        # 🔐 Check hashed password
         if user and check_password_hash(user["password"], password):
             return jsonify({
                 "message": "Login successful",
@@ -104,7 +112,7 @@ def login():
 
 
 # -----------------------------
-# CHAT ROUTE (Gemini API + user_id)
+# CHAT API
 # -----------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -122,7 +130,6 @@ def chat():
         if not api_key:
             return jsonify({"error": "API key not found"}), 500
 
-        # Gemini API URL
         url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
 
         payload = {
@@ -143,16 +150,8 @@ def chat():
             }), 500
 
         result = response.json()
+        ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
 
-        try:
-            ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception:
-            return jsonify({
-                "error": "Unexpected Gemini response format",
-                "details": result
-            }), 500
-
-        # Save chat WITH user_id
         connection = get_db_connection()
         cursor = connection.cursor()
 
@@ -167,9 +166,7 @@ def chat():
         cursor.close()
         connection.close()
 
-        return jsonify({
-            "response": ai_reply
-        })
+        return jsonify({"response": ai_reply})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -198,7 +195,8 @@ def get_history(user_id):
 
 
 # -----------------------------
-# Run Server
+# Run Server (Local Only)
 # -----------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
