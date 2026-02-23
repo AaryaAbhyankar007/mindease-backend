@@ -1,8 +1,9 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import mysql.connector
 import os
 import requests
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # -----------------------------
@@ -24,17 +25,15 @@ def check_env():
     }
 
 # -----------------------------
-# Database Connection (UPDATED)
+# Database Connection (POSTGRESQL)
 # -----------------------------
 def get_db_connection():
-    return mysql.connector.connect(
+    return psycopg2.connect(
         host=os.environ["DB_HOST"],
-        user=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"],
+        port=os.environ["DB_PORT"],
         database=os.environ["DB_NAME"],
-        port=int(os.environ["DB_PORT"]),
-        connection_timeout=10,
-        autocommit=True
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"]
     )
 
 # -----------------------------
@@ -64,10 +63,14 @@ def register():
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        query = "INSERT INTO users (name, email, password) VALUES (%s, %s, %s)"
-        cursor.execute(query, (name, email, hashed_password))
+        query = """
+        INSERT INTO users (name, email, password)
+        VALUES (%s, %s, %s)
+        """
 
+        cursor.execute(query, (name, email, hashed_password))
         connection.commit()
+
         cursor.close()
         connection.close()
 
@@ -92,7 +95,7 @@ def login():
             return jsonify({"error": "Email and password required"}), 400
 
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
 
         query = "SELECT * FROM users WHERE email=%s"
         cursor.execute(query, (email,))
@@ -181,9 +184,14 @@ def chat():
 def get_history(user_id):
     try:
         connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(cursor_factory=RealDictCursor)
 
-        query = "SELECT * FROM chat_history WHERE user_id=%s ORDER BY created_at ASC"
+        query = """
+        SELECT * FROM chat_history
+        WHERE user_id=%s
+        ORDER BY created_at ASC
+        """
+
         cursor.execute(query, (user_id,))
         chats = cursor.fetchall()
 
@@ -197,7 +205,7 @@ def get_history(user_id):
 
 
 # -----------------------------
-# Run Server (Local Only)
+# Run Server
 # -----------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
