@@ -5,6 +5,12 @@ import requests
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
+
+# -----------------------------
+# Load .env file
+# -----------------------------
+load_dotenv()
 
 # -----------------------------
 # Create Flask App
@@ -13,19 +19,7 @@ app = Flask(__name__)
 CORS(app)
 
 # -----------------------------
-# Debug Route (Check Environment)
-# -----------------------------
-@app.route("/check-env")
-def check_env():
-    return {
-        "DB_HOST": os.getenv("DB_HOST"),
-        "DB_USER": os.getenv("DB_USER"),
-        "DB_NAME": os.getenv("DB_NAME"),
-        "DB_PORT": os.getenv("DB_PORT")
-    }
-
-# -----------------------------
-# Database Connection (POSTGRESQL)
+# Database Connection
 # -----------------------------
 def get_db_connection():
     return psycopg2.connect(
@@ -35,6 +29,49 @@ def get_db_connection():
         user=os.environ["DB_USER"],
         password=os.environ["DB_PASSWORD"]
     )
+
+# -----------------------------
+# Auto Create Tables
+# -----------------------------
+def create_tables():
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100),
+        email VARCHAR(100) UNIQUE NOT NULL,
+        password TEXT NOT NULL
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS chat_history (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        message TEXT,
+        response TEXT,
+        emotion VARCHAR(50),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
+    connection.commit()
+    cursor.close()
+    connection.close()
+
+# -----------------------------
+# Debug Route
+# -----------------------------
+@app.route("/check-env")
+def check_env():
+    return {
+        "DB_HOST": os.getenv("DB_HOST"),
+        "DB_USER": os.getenv("DB_USER"),
+        "DB_NAME": os.getenv("DB_NAME"),
+        "DB_PORT": os.getenv("DB_PORT")
+    }
 
 # -----------------------------
 # Home Route
@@ -63,22 +100,22 @@ def register():
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        query = """
-        INSERT INTO users (name, email, password)
-        VALUES (%s, %s, %s)
-        """
+        cursor.execute(
+            "INSERT INTO users (name, email, password) VALUES (%s, %s, %s)",
+            (name, email, hashed_password)
+        )
 
-        cursor.execute(query, (name, email, hashed_password))
         connection.commit()
-
         cursor.close()
         connection.close()
 
         return jsonify({"message": "User registered successfully"})
 
+    except psycopg2.errors.UniqueViolation:
+        return jsonify({"error": "Email already exists"}), 400
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # -----------------------------
 # LOGIN API
@@ -97,8 +134,7 @@ def login():
         connection = get_db_connection()
         cursor = connection.cursor(cursor_factory=RealDictCursor)
 
-        query = "SELECT * FROM users WHERE email=%s"
-        cursor.execute(query, (email,))
+        cursor.execute("SELECT * FROM users WHERE email=%s", (email,))
         user = cursor.fetchone()
 
         cursor.close()
@@ -115,7 +151,6 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 # -----------------------------
 # CHAT API
 # -----------------------------
@@ -131,7 +166,6 @@ def chat():
             return jsonify({"error": "user_id and message are required"}), 400
 
         api_key = os.getenv("GOOGLE_AI_KEY")
-
         if not api_key:
             return jsonify({"error": "API key not found"}), 500
 
@@ -160,14 +194,12 @@ def chat():
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        query = """
-        INSERT INTO chat_history (user_id, message, response, emotion)
-        VALUES (%s, %s, %s, %s)
-        """
+        cursor.execute("""
+            INSERT INTO chat_history (user_id, message, response, emotion)
+            VALUES (%s, %s, %s, %s)
+        """, (user_id, user_message, ai_reply, "neutral"))
 
-        cursor.execute(query, (user_id, user_message, ai_reply, "neutral"))
         connection.commit()
-
         cursor.close()
         connection.close()
 
@@ -175,7 +207,6 @@ def chat():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # -----------------------------
 # GET CHAT HISTORY
@@ -186,13 +217,12 @@ def get_history(user_id):
         connection = get_db_connection()
         cursor = connection.cursor(cursor_factory=RealDictCursor)
 
-        query = """
-        SELECT * FROM chat_history
-        WHERE user_id=%s
-        ORDER BY created_at ASC
-        """
+        cursor.execute("""
+            SELECT * FROM chat_history
+            WHERE user_id=%s
+            ORDER BY created_at ASC
+        """, (user_id,))
 
-        cursor.execute(query, (user_id,))
         chats = cursor.fetchall()
 
         cursor.close()
@@ -203,10 +233,10 @@ def get_history(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 # -----------------------------
 # Run Server
 # -----------------------------
 if __name__ == "__main__":
+    create_tables()  # Auto-create tables on startup
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
