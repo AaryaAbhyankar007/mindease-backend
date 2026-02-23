@@ -24,7 +24,7 @@ def check_env():
     }
 
 # -----------------------------
-# Database Connection
+# Database Connection (UPDATED)
 # -----------------------------
 def get_db_connection():
     return mysql.connector.connect(
@@ -32,7 +32,9 @@ def get_db_connection():
         user=os.environ["DB_USER"],
         password=os.environ["DB_PASSWORD"],
         database=os.environ["DB_NAME"],
-        port=int(os.environ.get("DB_PORT", 3306))
+        port=int(os.environ["DB_PORT"]),
+        connection_timeout=10,
+        autocommit=True
     )
 
 # -----------------------------
