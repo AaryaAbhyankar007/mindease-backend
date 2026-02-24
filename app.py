@@ -13,7 +13,9 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Database connection
+# -----------------------------
+# Database Connection
+# -----------------------------
 def get_db_connection():
     database_url = os.getenv("DATABASE_URL")
 
@@ -22,13 +24,15 @@ def get_db_connection():
 
     return psycopg2.connect(database_url, sslmode="require")
 
-# Create / Update Tables Properly
+# -----------------------------
+# Create / Update Tables (SAFE VERSION)
+# -----------------------------
 def create_tables():
     try:
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        # Users
+        # Users Table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -38,7 +42,7 @@ def create_tables():
         );
         """)
 
-        # Chat History (base structure)
+        # Chat History Table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
             id SERIAL PRIMARY KEY,
@@ -49,13 +53,13 @@ def create_tables():
         );
         """)
 
-        # 🔥 IMPORTANT FIX
+        # 🔥 Add risk_level column safely
         cursor.execute("""
         ALTER TABLE chat_history
         ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20);
         """)
 
-        # Game Scores
+        # Game Scores Table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS game_scores (
             id SERIAL PRIMARY KEY,
@@ -69,17 +73,21 @@ def create_tables():
         cursor.close()
         connection.close()
 
-        print("Database updated successfully.")
+        print("Database ready.")
 
     except Exception as e:
-        print("Table error:", e)
+        print("Database error:", e)
 
-# Home route
+# -----------------------------
+# Home Route
+# -----------------------------
 @app.route("/")
 def home():
     return "MindEase Backend Running Successfully 🚀"
 
-# Register
+# -----------------------------
+# REGISTER
+# -----------------------------
 @app.route("/register", methods=["POST"])
 def register():
     try:
@@ -114,7 +122,9 @@ def register():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Login
+# -----------------------------
+# LOGIN
+# -----------------------------
 @app.route("/login", methods=["POST"])
 def login():
     try:
@@ -143,7 +153,9 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Chat with Risk Detection
+# -----------------------------
+# CHAT WITH RISK DETECTION
+# -----------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
@@ -155,7 +167,7 @@ def chat():
         if not user_id or not user_message:
             return jsonify({"error": "Required fields missing"}), 400
 
-        # Risk keywords
+        # Risk detection
         critical_keywords = [
             "suicide", "kill myself", "end my life",
             "self harm", "hurt myself",
@@ -195,7 +207,7 @@ def chat():
         result = response.json()
         ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
 
-        # Save Chat
+        # Save chat
         connection = get_db_connection()
         cursor = connection.cursor()
 
@@ -217,7 +229,9 @@ def chat():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Game Score
+# -----------------------------
+# GAME SCORE
+# -----------------------------
 @app.route("/game-score", methods=["POST"])
 def save_score():
     try:
@@ -242,7 +256,9 @@ def save_score():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# History
+# -----------------------------
+# HISTORY
+# -----------------------------
 @app.route("/history/<int:user_id>")
 def history(user_id):
     try:
@@ -265,7 +281,9 @@ def history(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# -----------------------------
 # Run
+# -----------------------------
 if __name__ == "__main__":
     create_tables()
     port = int(os.environ.get("PORT", 10000))
