@@ -7,15 +7,14 @@ from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
-# Load .env for local development
+# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-
 # -----------------------------
-# Database Connection
+# DATABASE CONNECTION
 # -----------------------------
 def get_db_connection():
     database_url = os.getenv("DATABASE_URL")
@@ -27,7 +26,7 @@ def get_db_connection():
 
 
 # -----------------------------
-# Create Tables (Safe)
+# CREATE TABLES (SAFE)
 # -----------------------------
 def create_tables():
     try:
@@ -44,7 +43,7 @@ def create_tables():
         );
         """)
 
-        # Chat History
+        # Chat History Table
         cur.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
             id SERIAL PRIMARY KEY,
@@ -56,7 +55,7 @@ def create_tables():
         );
         """)
 
-        # Game Scores
+        # Game Scores Table
         cur.execute("""
         CREATE TABLE IF NOT EXISTS game_scores (
             id SERIAL PRIMARY KEY,
@@ -70,14 +69,14 @@ def create_tables():
         cur.close()
         conn.close()
 
-        print("Database ready ✅")
+        print("✅ All tables verified/created successfully.")
 
     except Exception as e:
-        print("Database Error:", e)
+        print("❌ Database Setup Error:", e)
 
 
 # -----------------------------
-# Home
+# HOME ROUTE
 # -----------------------------
 @app.route("/")
 def home():
@@ -85,7 +84,7 @@ def home():
 
 
 # -----------------------------
-# Register
+# REGISTER
 # -----------------------------
 @app.route("/register", methods=["POST"])
 def register():
@@ -123,7 +122,7 @@ def register():
 
 
 # -----------------------------
-# Login
+# LOGIN
 # -----------------------------
 @app.route("/login", methods=["POST"])
 def login():
@@ -155,7 +154,7 @@ def login():
 
 
 # -----------------------------
-# Chat + Risk Detection
+# CHAT WITH RISK DETECTION
 # -----------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -164,23 +163,19 @@ def chat():
 
         user_id = data.get("user_id")
         message = data.get("message")
-        location = data.get("location")  # optional city
+        location = data.get("location")
 
         if not user_id or not message:
             return jsonify({"error": "Required fields missing"}), 400
 
-        # Risk Detection
+        # Risk detection
         keywords = ["suicide", "kill myself", "end my life", "want to die"]
-
         risk_level = "low"
-        msg = message.lower()
 
-        for word in keywords:
-            if word in msg:
-                risk_level = "high"
-                break
+        if any(word in message.lower() for word in keywords):
+            risk_level = "high"
 
-        # AI Response (Gemini)
+        # AI call
         api_key = os.getenv("GOOGLE_AI_KEY")
 
         if not api_key:
@@ -203,7 +198,7 @@ def chat():
         result = response.json()
         ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
 
-        # Save Chat
+        # Save chat
         conn = get_db_connection()
         cur = conn.cursor()
 
@@ -216,12 +211,11 @@ def chat():
         cur.close()
         conn.close()
 
-        # Emergency Support
-        support_info = None
-
+        # Emergency Support Info
+        support = None
         if risk_level == "high":
             city = location if location else "India"
-            support_info = {
+            support = {
                 "helpline": "📞 National Suicide Helpline (India): 9152987821",
                 "maps_link": f"https://www.google.com/maps/search/psychologist+near+{city}"
             }
@@ -230,7 +224,7 @@ def chat():
             "response": ai_reply,
             "risk_level": risk_level,
             "emergency": risk_level == "high",
-            "support": support_info
+            "support": support
         })
 
     except Exception as e:
@@ -238,7 +232,7 @@ def chat():
 
 
 # -----------------------------
-# Game Score
+# GAME SCORE
 # -----------------------------
 @app.route("/game-score", methods=["POST"])
 def game_score():
@@ -270,7 +264,7 @@ def game_score():
 
 
 # -----------------------------
-# History
+# CHAT HISTORY
 # -----------------------------
 @app.route("/history/<int:user_id>", methods=["GET"])
 def history(user_id):
@@ -297,9 +291,9 @@ def history(user_id):
 
 
 # -----------------------------
-# Run Server
+# RUN SERVER
 # -----------------------------
 if __name__ == "__main__":
-    create_tables()  # Safe on Render
+    create_tables()  # Ensures all tables exist
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
