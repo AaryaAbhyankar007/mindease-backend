@@ -19,7 +19,7 @@ app = Flask(__name__)
 CORS(app)
 
 # -----------------------------
-# Database Connection (FINAL SAFE VERSION)
+# Database Connection
 # -----------------------------
 def get_db_connection():
     database_url = os.getenv("DATABASE_URL")
@@ -146,7 +146,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# CHAT API
+# CHAT API (WITH CRITICAL DETECTION)
 # -----------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -159,6 +159,27 @@ def chat():
         if not user_id or not user_message:
             return jsonify({"error": "user_id and message are required"}), 400
 
+        # -----------------------------
+        # Critical Case Detection
+        # -----------------------------
+        critical_keywords = [
+            "suicide",
+            "kill myself",
+            "end my life",
+            "self harm",
+            "hurt myself"
+        ]
+
+        risk_level = "low"
+
+        for word in critical_keywords:
+            if word in user_message.lower():
+                risk_level = "high"
+                break
+
+        # -----------------------------
+        # Gemini API Call
+        # -----------------------------
         api_key = os.getenv("GOOGLE_AI_KEY")
         if not api_key:
             return jsonify({"error": "API key not found"}), 500
@@ -185,19 +206,28 @@ def chat():
         result = response.json()
         ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
 
+        # -----------------------------
+        # Save Chat to Database
+        # -----------------------------
         connection = get_db_connection()
         cursor = connection.cursor()
 
         cursor.execute("""
             INSERT INTO chat_history (user_id, message, response, emotion)
             VALUES (%s, %s, %s, %s)
-        """, (user_id, user_message, ai_reply, "neutral"))
+        """, (user_id, user_message, ai_reply, risk_level))
 
         connection.commit()
         cursor.close()
         connection.close()
 
-        return jsonify({"response": ai_reply})
+        # -----------------------------
+        # Return Response with Risk Level
+        # -----------------------------
+        return jsonify({
+            "response": ai_reply,
+            "risk_level": risk_level
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
