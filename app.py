@@ -8,7 +8,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 # -----------------------------
-# Load .env file
+# Load .env file (local only)
 # -----------------------------
 load_dotenv()
 
@@ -19,59 +19,53 @@ app = Flask(__name__)
 CORS(app)
 
 # -----------------------------
-# Database Connection
+# Database Connection (FINAL SAFE VERSION)
 # -----------------------------
 def get_db_connection():
+    database_url = os.getenv("DATABASE_URL")
+
+    if not database_url:
+        raise Exception("DATABASE_URL is not set")
+
     return psycopg2.connect(
-        host=os.environ["DB_HOST"],
-        port=os.environ["DB_PORT"],
-        database=os.environ["DB_NAME"],
-        user=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"]
+        database_url,
+        sslmode="require"
     )
 
 # -----------------------------
 # Auto Create Tables
 # -----------------------------
 def create_tables():
-    connection = get_db_connection()
-    cursor = connection.cursor()
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id SERIAL PRIMARY KEY,
-        name VARCHAR(100),
-        email VARCHAR(100) UNIQUE NOT NULL,
-        password TEXT NOT NULL
-    );
-    """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(100),
+            email VARCHAR(100) UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        );
+        """)
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS chat_history (
-        id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-        message TEXT,
-        response TEXT,
-        emotion VARCHAR(50),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            message TEXT,
+            response TEXT,
+            emotion VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
 
-    connection.commit()
-    cursor.close()
-    connection.close()
+        connection.commit()
+        cursor.close()
+        connection.close()
 
-# -----------------------------
-# Debug Route
-# -----------------------------
-@app.route("/check-env")
-def check_env():
-    return {
-        "DB_HOST": os.getenv("DB_HOST"),
-        "DB_USER": os.getenv("DB_USER"),
-        "DB_NAME": os.getenv("DB_NAME"),
-        "DB_PORT": os.getenv("DB_PORT")
-    }
+    except Exception as e:
+        print("Table creation error:", e)
 
 # -----------------------------
 # Home Route
@@ -237,6 +231,6 @@ def get_history(user_id):
 # Run Server
 # -----------------------------
 if __name__ == "__main__":
-    create_tables()  # Auto-create tables on startup
+    create_tables()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
