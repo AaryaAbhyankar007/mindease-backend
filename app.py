@@ -8,12 +8,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 # -----------------------------
-# Load .env file (local only)
+# Load .env (local only)
 # -----------------------------
 load_dotenv()
 
 # -----------------------------
-# Create Flask App
+# App Setup
 # -----------------------------
 app = Flask(__name__)
 CORS(app)
@@ -27,19 +27,17 @@ def get_db_connection():
     if not database_url:
         raise Exception("DATABASE_URL is not set")
 
-    return psycopg2.connect(
-        database_url,
-        sslmode="require"
-    )
+    return psycopg2.connect(database_url, sslmode="require")
 
 # -----------------------------
-# Auto Create Tables
+# Create Tables
 # -----------------------------
 def create_tables():
     try:
         connection = get_db_connection()
         cursor = connection.cursor()
 
+        # Users
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -49,13 +47,24 @@ def create_tables():
         );
         """)
 
+        # Chat History
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
             id SERIAL PRIMARY KEY,
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
             message TEXT,
             response TEXT,
-            emotion VARCHAR(50),
+            risk_level VARCHAR(20),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+
+        # Game Scores
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS game_scores (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            score INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
@@ -75,7 +84,7 @@ def home():
     return "MindEase Backend Running Successfully 🚀"
 
 # -----------------------------
-# REGISTER API
+# REGISTER
 # -----------------------------
 @app.route("/register", methods=["POST"])
 def register():
@@ -112,7 +121,7 @@ def register():
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# LOGIN API
+# LOGIN
 # -----------------------------
 @app.route("/login", methods=["POST"])
 def login():
@@ -121,9 +130,6 @@ def login():
 
         email = data.get("email")
         password = data.get("password")
-
-        if not email or not password:
-            return jsonify({"error": "Email and password required"}), 400
 
         connection = get_db_connection()
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -139,14 +145,14 @@ def login():
                 "message": "Login successful",
                 "user_id": user["id"]
             })
-        else:
-            return jsonify({"error": "Invalid credentials"}), 401
+
+        return jsonify({"error": "Invalid credentials"}), 401
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# CHAT API (WITH ENHANCED CRITICAL DETECTION)
+# CHAT (WITH EMERGENCY DETECTION)
 # -----------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -157,33 +163,16 @@ def chat():
         user_message = data.get("message")
 
         if not user_id or not user_message:
-            return jsonify({"error": "user_id and message are required"}), 400
+            return jsonify({"error": "user_id and message required"}), 400
 
-        # -----------------------------
-        # Enhanced Critical Detection
-        # -----------------------------
+        # -------- Risk Detection --------
         critical_keywords = [
-            "suicide",
-            "kill myself",
-            "end my life",
-            "ending my life",
-            "self harm",
-            "self-harm",
-            "hurt myself",
-            "harm myself",
-            "i want to die",
-            "want to die",
-            "don't want to live",
-            "do not want to live",
-            "no reason to live",
-            "wish i was dead",
-            "give up on life",
-            "can't go on",
-            "cant go on",
-            "life is meaningless",
-            "life is useless",
-            "i am a burden",
-            "everyone would be better without me"
+            "suicide", "kill myself", "end my life", "ending my life",
+            "self harm", "hurt myself", "harm myself",
+            "i want to die", "want to die", "wish i was dead",
+            "don't want to live", "do not want to live",
+            "no reason to live", "can't go on", "cant go on",
+            "life is meaningless", "give up on life"
         ]
 
         risk_level = "low"
@@ -194,12 +183,10 @@ def chat():
                 risk_level = "high"
                 break
 
-        # -----------------------------
-        # Gemini API Call
-        # -----------------------------
+        # -------- AI Call --------
         api_key = os.getenv("GOOGLE_AI_KEY")
         if not api_key:
-            return jsonify({"error": "API key not found"}), 500
+            return jsonify({"error": "API key missing"}), 500
 
         url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
 
@@ -215,22 +202,17 @@ def chat():
         response = requests.post(url, json=payload, timeout=30)
 
         if response.status_code != 200:
-            return jsonify({
-                "error": "Gemini API failed",
-                "details": response.text
-            }), 500
+            return jsonify({"error": "AI failed"}), 500
 
         result = response.json()
         ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
 
-        # -----------------------------
-        # Save Chat to Database
-        # -----------------------------
+        # -------- Save Chat --------
         connection = get_db_connection()
         cursor = connection.cursor()
 
         cursor.execute("""
-            INSERT INTO chat_history (user_id, message, response, emotion)
+            INSERT INTO chat_history (user_id, message, response, risk_level)
             VALUES (%s, %s, %s, %s)
         """, (user_id, user_message, ai_reply, risk_level))
 
@@ -238,19 +220,44 @@ def chat():
         cursor.close()
         connection.close()
 
-        # -----------------------------
-        # Return Response
-        # -----------------------------
         return jsonify({
             "response": ai_reply,
-            "risk_level": risk_level
+            "risk_level": risk_level,
+            "emergency": True if risk_level == "high" else False
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# GET CHAT HISTORY
+# GAME SCORE API
+# -----------------------------
+@app.route("/game-score", methods=["POST"])
+def save_score():
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+        score = data.get("score")
+
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            INSERT INTO game_scores (user_id, score)
+            VALUES (%s, %s)
+        """, (user_id, score))
+
+        connection.commit()
+        cursor.close()
+        connection.close()
+
+        return jsonify({"message": "Score saved"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# -----------------------------
+# CHAT HISTORY
 # -----------------------------
 @app.route("/history/<int:user_id>", methods=["GET"])
 def get_history(user_id):
@@ -275,7 +282,7 @@ def get_history(user_id):
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# Run Server
+# Run App
 # -----------------------------
 if __name__ == "__main__":
     create_tables()
