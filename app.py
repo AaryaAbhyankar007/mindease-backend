@@ -146,7 +146,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# CHAT API (WITH CRITICAL DETECTION)
+# CHAT API (WITH ENHANCED CRITICAL DETECTION)
 # -----------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -160,20 +160,37 @@ def chat():
             return jsonify({"error": "user_id and message are required"}), 400
 
         # -----------------------------
-        # Critical Case Detection
+        # Enhanced Critical Detection
         # -----------------------------
         critical_keywords = [
             "suicide",
             "kill myself",
             "end my life",
+            "ending my life",
             "self harm",
-            "hurt myself"
+            "self-harm",
+            "hurt myself",
+            "harm myself",
+            "i want to die",
+            "want to die",
+            "don't want to live",
+            "do not want to live",
+            "no reason to live",
+            "wish i was dead",
+            "give up on life",
+            "can't go on",
+            "cant go on",
+            "life is meaningless",
+            "life is useless",
+            "i am a burden",
+            "everyone would be better without me"
         ]
 
         risk_level = "low"
+        message_lower = user_message.lower()
 
         for word in critical_keywords:
-            if word in user_message.lower():
+            if word in message_lower:
                 risk_level = "high"
                 break
 
@@ -222,7 +239,7 @@ def chat():
         connection.close()
 
         # -----------------------------
-        # Return Response with Risk Level
+        # Return Response
         # -----------------------------
         return jsonify({
             "response": ai_reply,
