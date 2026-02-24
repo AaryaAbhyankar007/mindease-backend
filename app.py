@@ -8,7 +8,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 # -----------------------------
-# Load .env (local only)
+# Load .env (Local Only)
 # -----------------------------
 load_dotenv()
 
@@ -54,14 +54,9 @@ def create_tables():
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
             message TEXT,
             response TEXT,
+            risk_level VARCHAR(20),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        """)
-
-        # Add risk_level column safely
-        cursor.execute("""
-        ALTER TABLE chat_history
-        ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20);
         """)
 
         # Game Scores Table
@@ -78,10 +73,10 @@ def create_tables():
         cursor.close()
         connection.close()
 
-        print("Tables checked/created successfully.")
+        print("Tables ready.")
 
     except Exception as e:
-        print("Table creation error:", e)
+        print("Table error:", e)
 
 # -----------------------------
 # Home Route
@@ -159,7 +154,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# CHAT API
+# CHAT WITH RISK DETECTION
 # -----------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -172,12 +167,14 @@ def chat():
         if not user_id or not user_message:
             return jsonify({"error": "Required fields missing"}), 400
 
-        # Risk Detection
+        # -------- Risk Detection --------
         critical_keywords = [
             "suicide", "kill myself", "end my life",
             "self harm", "hurt myself",
             "i want to die", "want to die",
-            "can't go on", "cant go on"
+            "can't go on", "cant go on",
+            "wish i was dead", "give up on life",
+            "no reason to live"
         ]
 
         risk_level = "low"
@@ -188,11 +185,11 @@ def chat():
                 risk_level = "high"
                 break
 
-        # Gemini API
+        # -------- Gemini AI Call --------
         api_key = os.getenv("GOOGLE_AI_KEY")
 
         if not api_key:
-            return jsonify({"error": "API key missing"}), 500
+            return jsonify({"error": "AI key missing"}), 500
 
         url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
 
@@ -211,7 +208,7 @@ def chat():
         result = response.json()
         ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
 
-        # Save Chat
+        # -------- Save Chat --------
         connection = get_db_connection()
         cursor = connection.cursor()
 
@@ -261,7 +258,7 @@ def save_score():
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# HISTORY
+# CHAT HISTORY
 # -----------------------------
 @app.route("/history/<int:user_id>")
 def history(user_id):
