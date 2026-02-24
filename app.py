@@ -7,20 +7,13 @@ from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
-# -----------------------------
-# Load .env (Local Only)
-# -----------------------------
+# Load local .env only
 load_dotenv()
 
-# -----------------------------
-# App Setup
-# -----------------------------
 app = Flask(__name__)
 CORS(app)
 
-# -----------------------------
-# Database Connection
-# -----------------------------
+# Database connection
 def get_db_connection():
     database_url = os.getenv("DATABASE_URL")
 
@@ -29,15 +22,13 @@ def get_db_connection():
 
     return psycopg2.connect(database_url, sslmode="require")
 
-# -----------------------------
-# Create / Update Tables
-# -----------------------------
+# Create / Update Tables Properly
 def create_tables():
     try:
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        # Users Table
+        # Users
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -47,19 +38,24 @@ def create_tables():
         );
         """)
 
-        # Chat History Table
+        # Chat History (base structure)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
             id SERIAL PRIMARY KEY,
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
             message TEXT,
             response TEXT,
-            risk_level VARCHAR(20),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
 
-        # Game Scores Table
+        # 🔥 IMPORTANT FIX
+        cursor.execute("""
+        ALTER TABLE chat_history
+        ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20);
+        """)
+
+        # Game Scores
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS game_scores (
             id SERIAL PRIMARY KEY,
@@ -73,21 +69,17 @@ def create_tables():
         cursor.close()
         connection.close()
 
-        print("Tables ready.")
+        print("Database updated successfully.")
 
     except Exception as e:
         print("Table error:", e)
 
-# -----------------------------
-# Home Route
-# -----------------------------
+# Home route
 @app.route("/")
 def home():
     return "MindEase Backend Running Successfully 🚀"
 
-# -----------------------------
-# REGISTER
-# -----------------------------
+# Register
 @app.route("/register", methods=["POST"])
 def register():
     try:
@@ -122,9 +114,7 @@ def register():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# -----------------------------
-# LOGIN
-# -----------------------------
+# Login
 @app.route("/login", methods=["POST"])
 def login():
     try:
@@ -153,9 +143,7 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# -----------------------------
-# CHAT WITH RISK DETECTION
-# -----------------------------
+# Chat with Risk Detection
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
@@ -167,14 +155,13 @@ def chat():
         if not user_id or not user_message:
             return jsonify({"error": "Required fields missing"}), 400
 
-        # -------- Risk Detection --------
+        # Risk keywords
         critical_keywords = [
             "suicide", "kill myself", "end my life",
             "self harm", "hurt myself",
             "i want to die", "want to die",
             "can't go on", "cant go on",
-            "wish i was dead", "give up on life",
-            "no reason to live"
+            "wish i was dead", "give up on life"
         ]
 
         risk_level = "low"
@@ -185,7 +172,7 @@ def chat():
                 risk_level = "high"
                 break
 
-        # -------- Gemini AI Call --------
+        # AI Call
         api_key = os.getenv("GOOGLE_AI_KEY")
 
         if not api_key:
@@ -208,7 +195,7 @@ def chat():
         result = response.json()
         ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
 
-        # -------- Save Chat --------
+        # Save Chat
         connection = get_db_connection()
         cursor = connection.cursor()
 
@@ -230,9 +217,7 @@ def chat():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# -----------------------------
-# GAME SCORE
-# -----------------------------
+# Game Score
 @app.route("/game-score", methods=["POST"])
 def save_score():
     try:
@@ -257,9 +242,7 @@ def save_score():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# -----------------------------
-# CHAT HISTORY
-# -----------------------------
+# History
 @app.route("/history/<int:user_id>")
 def history(user_id):
     try:
@@ -282,9 +265,7 @@ def history(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# -----------------------------
-# Run App
-# -----------------------------
+# Run
 if __name__ == "__main__":
     create_tables()
     port = int(os.environ.get("PORT", 10000))
