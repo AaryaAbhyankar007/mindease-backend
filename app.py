@@ -23,14 +23,12 @@ CORS(app)
 # -----------------------------
 def get_db_connection():
     database_url = os.getenv("DATABASE_URL")
-
     if not database_url:
         raise Exception("DATABASE_URL is not set")
-
     return psycopg2.connect(database_url, sslmode="require")
 
 # -----------------------------
-# Create Tables
+# Create / Update Tables
 # -----------------------------
 def create_tables():
     try:
@@ -47,16 +45,21 @@ def create_tables():
         );
         """)
 
-        # Chat History
+        # Chat History (without risk_level first)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
             id SERIAL PRIMARY KEY,
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
             message TEXT,
             response TEXT,
-            risk_level VARCHAR(20),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        """)
+
+        # Add risk_level column safely
+        cursor.execute("""
+        ALTER TABLE chat_history
+        ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20);
         """)
 
         # Game Scores
@@ -77,7 +80,7 @@ def create_tables():
         print("Table creation error:", e)
 
 # -----------------------------
-# Home Route
+# Home
 # -----------------------------
 @app.route("/")
 def home():
@@ -90,13 +93,12 @@ def home():
 def register():
     try:
         data = request.get_json()
-
         name = data.get("name")
         email = data.get("email")
         password = data.get("password")
 
         if not name or not email or not password:
-            return jsonify({"error": "All fields are required"}), 400
+            return jsonify({"error": "All fields required"}), 400
 
         hashed_password = generate_password_hash(password)
 
@@ -127,7 +129,6 @@ def register():
 def login():
     try:
         data = request.get_json()
-
         email = data.get("email")
         password = data.get("password")
 
@@ -152,26 +153,25 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# CHAT (WITH EMERGENCY DETECTION)
+# CHAT WITH RISK DETECTION
 # -----------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
         data = request.get_json()
-
         user_id = data.get("user_id")
         user_message = data.get("message")
 
         if not user_id or not user_message:
-            return jsonify({"error": "user_id and message required"}), 400
+            return jsonify({"error": "Required fields missing"}), 400
 
-        # -------- Risk Detection --------
+        # Risk Detection
         critical_keywords = [
             "suicide", "kill myself", "end my life", "ending my life",
             "self harm", "hurt myself", "harm myself",
-            "i want to die", "want to die", "wish i was dead",
-            "don't want to live", "do not want to live",
-            "no reason to live", "can't go on", "cant go on",
+            "i want to die", "want to die",
+            "wish i was dead", "don't want to live",
+            "cant go on", "can't go on",
             "life is meaningless", "give up on life"
         ]
 
@@ -183,7 +183,7 @@ def chat():
                 risk_level = "high"
                 break
 
-        # -------- AI Call --------
+        # AI Call
         api_key = os.getenv("GOOGLE_AI_KEY")
         if not api_key:
             return jsonify({"error": "API key missing"}), 500
@@ -207,7 +207,7 @@ def chat():
         result = response.json()
         ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
 
-        # -------- Save Chat --------
+        # Save Chat
         connection = get_db_connection()
         cursor = connection.cursor()
 
@@ -223,14 +223,14 @@ def chat():
         return jsonify({
             "response": ai_reply,
             "risk_level": risk_level,
-            "emergency": True if risk_level == "high" else False
+            "emergency": risk_level == "high"
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# GAME SCORE API
+# GAME SCORE
 # -----------------------------
 @app.route("/game-score", methods=["POST"])
 def save_score():
@@ -257,10 +257,10 @@ def save_score():
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# CHAT HISTORY
+# HISTORY
 # -----------------------------
-@app.route("/history/<int:user_id>", methods=["GET"])
-def get_history(user_id):
+@app.route("/history/<int:user_id>")
+def history(user_id):
     try:
         connection = get_db_connection()
         cursor = connection.cursor(cursor_factory=RealDictCursor)
@@ -282,7 +282,7 @@ def get_history(user_id):
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# Run App
+# Run
 # -----------------------------
 if __name__ == "__main__":
     create_tables()
