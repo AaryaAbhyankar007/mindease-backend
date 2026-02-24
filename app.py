@@ -23,8 +23,10 @@ CORS(app)
 # -----------------------------
 def get_db_connection():
     database_url = os.getenv("DATABASE_URL")
+
     if not database_url:
         raise Exception("DATABASE_URL is not set")
+
     return psycopg2.connect(database_url, sslmode="require")
 
 # -----------------------------
@@ -35,7 +37,7 @@ def create_tables():
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        # Users
+        # Users Table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -45,7 +47,7 @@ def create_tables():
         );
         """)
 
-        # Chat History (without risk_level first)
+        # Chat History Table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
             id SERIAL PRIMARY KEY,
@@ -62,7 +64,7 @@ def create_tables():
         ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20);
         """)
 
-        # Game Scores
+        # Game Scores Table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS game_scores (
             id SERIAL PRIMARY KEY,
@@ -76,11 +78,13 @@ def create_tables():
         cursor.close()
         connection.close()
 
+        print("Tables checked/created successfully.")
+
     except Exception as e:
         print("Table creation error:", e)
 
 # -----------------------------
-# Home
+# Home Route
 # -----------------------------
 @app.route("/")
 def home():
@@ -93,6 +97,7 @@ def home():
 def register():
     try:
         data = request.get_json()
+
         name = data.get("name")
         email = data.get("email")
         password = data.get("password")
@@ -129,6 +134,7 @@ def register():
 def login():
     try:
         data = request.get_json()
+
         email = data.get("email")
         password = data.get("password")
 
@@ -153,12 +159,13 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# CHAT WITH RISK DETECTION
+# CHAT API
 # -----------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
         data = request.get_json()
+
         user_id = data.get("user_id")
         user_message = data.get("message")
 
@@ -167,12 +174,10 @@ def chat():
 
         # Risk Detection
         critical_keywords = [
-            "suicide", "kill myself", "end my life", "ending my life",
-            "self harm", "hurt myself", "harm myself",
+            "suicide", "kill myself", "end my life",
+            "self harm", "hurt myself",
             "i want to die", "want to die",
-            "wish i was dead", "don't want to live",
-            "cant go on", "can't go on",
-            "life is meaningless", "give up on life"
+            "can't go on", "cant go on"
         ]
 
         risk_level = "low"
@@ -183,20 +188,19 @@ def chat():
                 risk_level = "high"
                 break
 
-        # AI Call
+        # Gemini API
         api_key = os.getenv("GOOGLE_AI_KEY")
+
         if not api_key:
             return jsonify({"error": "API key missing"}), 500
 
         url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
 
         payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": user_message}]
-                }
-            ]
+            "contents": [{
+                "role": "user",
+                "parts": [{"text": user_message}]
+            }]
         }
 
         response = requests.post(url, json=payload, timeout=30)
@@ -282,7 +286,7 @@ def history(user_id):
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# Run
+# Run App
 # -----------------------------
 if __name__ == "__main__":
     create_tables()
