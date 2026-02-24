@@ -7,7 +7,7 @@ from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
-# Load local .env only
+# Load environment variables (local only)
 load_dotenv()
 
 app = Flask(__name__)
@@ -25,14 +25,14 @@ def get_db_connection():
     return psycopg2.connect(database_url, sslmode="require")
 
 # -----------------------------
-# Create / Update Tables (SAFE VERSION)
+# Create / Update Tables (SAFE MIGRATION)
 # -----------------------------
 def create_tables():
     try:
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        # Users Table
+        # Users table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -42,7 +42,7 @@ def create_tables():
         );
         """)
 
-        # Chat History Table
+        # Chat history base table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_history (
             id SERIAL PRIMARY KEY,
@@ -53,13 +53,13 @@ def create_tables():
         );
         """)
 
-        # 🔥 Add risk_level column safely
+        # 🔥 SAFE COLUMN ADDITION (THIS FIXES YOUR ERROR)
         cursor.execute("""
         ALTER TABLE chat_history
         ADD COLUMN IF NOT EXISTS risk_level VARCHAR(20);
         """)
 
-        # Game Scores Table
+        # Game scores table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS game_scores (
             id SERIAL PRIMARY KEY,
@@ -282,7 +282,7 @@ def history(user_id):
         return jsonify({"error": str(e)}), 500
 
 # -----------------------------
-# Run
+# Run App
 # -----------------------------
 if __name__ == "__main__":
     create_tables()
