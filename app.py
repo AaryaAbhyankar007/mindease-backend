@@ -188,7 +188,7 @@ def chat():
         cur.close()
         conn.close()
 
-        # Emergency Support Info (Hybrid)
+        # Emergency Support Info (Hybrid with Debug)
         support = None
         if risk_level == "high":
             support = {
@@ -201,6 +201,13 @@ def chat():
                     # Try Google Places API
                     places_url = f"https://maps.googleapis.com/maps/api/place/textsearch/json?query=psychologist+near+{location}&key={maps_key}"
                     places_response = requests.get(places_url)
+
+                    # Debug log
+                    try:
+                        print("Places API raw response:", places_response.json())
+                    except Exception as e:
+                        print("❌ Failed to parse Places API response:", e)
+
                     if places_response.status_code == 200:
                         places_data = places_response.json()
                         results = []
