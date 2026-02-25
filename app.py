@@ -188,14 +188,33 @@ def chat():
         cur.close()
         conn.close()
 
-        # Emergency Support Info
+        # Emergency Support Info (Hybrid)
         support = None
         if risk_level == "high":
             support = {
                 "helpline": "📞 National Suicide Helpline (India): 9152987821"
             }
+
+            maps_key = os.getenv("GOOGLE_MAPS_KEY")
             if location:
-                support["maps_link"] = f"https://www.google.com/maps/search/psychologist+near+{location}"
+                if maps_key:
+                    # Try Google Places API
+                    places_url = f"https://maps.googleapis.com/maps/api/place/textsearch/json?query=psychologist+near+{location}&key={maps_key}"
+                    places_response = requests.get(places_url)
+                    if places_response.status_code == 200:
+                        places_data = places_response.json()
+                        results = []
+                        for place in places_data.get("results", [])[:3]:  # top 3 results
+                            results.append({
+                                "name": place.get("name"),
+                                "address": place.get("formatted_address"),
+                                "rating": place.get("rating")
+                            })
+                        support["nearby_psychologists"] = results
+                    else:
+                        support["maps_link"] = f"https://www.google.com/maps/search/psychologist+near+{location}"
+                else:
+                    support["maps_link"] = f"https://www.google.com/maps/search/psychologist+near+{location}"
             else:
                 support["maps_link"] = "https://www.google.com/maps/search/psychologist+near+India"
 
