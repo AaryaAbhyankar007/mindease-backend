@@ -191,11 +191,13 @@ def chat():
         # Emergency Support Info
         support = None
         if risk_level == "high":
-            city = location if location else "India"
             support = {
-                "helpline": "📞 National Suicide Helpline (India): 9152987821",
-                "maps_link": f"https://www.google.com/maps/search/psychologist+near+{city}"
+                "helpline": "📞 National Suicide Helpline (India): 9152987821"
             }
+            if location:
+                support["maps_link"] = f"https://www.google.com/maps/search/psychologist+near+{location}"
+            else:
+                support["maps_link"] = "https://www.google.com/maps/search/psychologist+near+India"
 
         return jsonify({
             "response": ai_reply,
