@@ -60,7 +60,7 @@ def create_tables():
         CREATE TABLE IF NOT EXISTS game_scores (
             id SERIAL PRIMARY KEY,
             user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            score INTEGER,
+            score INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """)
@@ -245,6 +245,12 @@ def game_score():
         if not user_id or score is None:
             return jsonify({"error": "Required fields missing"}), 400
 
+        # Ensure score is integer
+        try:
+            score = int(score)
+        except ValueError:
+            return jsonify({"error": "Score must be an integer"}), 400
+
         conn = get_db_connection()
         cur = conn.cursor()
 
@@ -297,3 +303,4 @@ if __name__ == "__main__":
     create_tables()  # Ensures all tables exist
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+s
