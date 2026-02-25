@@ -23,6 +23,13 @@ def get_db():
     return conn
 
 # -------------------------------
+# Home Route (fixes 404 at /)
+# -------------------------------
+@app.route("/", methods=["GET"])
+def home():
+    return "MindEase Backend is running 🚀"
+
+# -------------------------------
 # Risk Escalation Logic
 # -------------------------------
 def check_risk_escalation(user_id):
