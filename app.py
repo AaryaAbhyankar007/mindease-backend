@@ -72,6 +72,9 @@ def create_tables():
         print("❌ Database Setup Error:", e)
 
 
+# Run table creation immediately (works on Render too)
+create_tables()
+
 # -----------------------------
 # HOME ROUTE
 # -----------------------------
@@ -260,6 +263,5 @@ def history(user_id):
 # RUN SERVER
 # -----------------------------
 if __name__ == "__main__":
-    create_tables()  # Ensures all tables exist
     port = int(os.environ.get("PORT", 5000))  # Render sets PORT, default 5000 locally
     app.run(host="0.0.0.0", port=port)
