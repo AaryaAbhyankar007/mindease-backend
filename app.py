@@ -188,7 +188,7 @@ def chat():
         cur.close()
         conn.close()
 
-        # Emergency Support Info (Hybrid with Debug)
+        # Emergency Support Info (Global + Maps Link)
         support = None
         if risk_level == "high":
             support = {
@@ -198,11 +198,10 @@ def chat():
             maps_key = os.getenv("GOOGLE_MAPS_KEY")
             if location:
                 if maps_key:
-                    # Try Google Places API
+                    # Google Places API call
                     places_url = f"https://maps.googleapis.com/maps/api/place/textsearch/json?query=psychologist+near+{location}&key={maps_key}"
                     places_response = requests.get(places_url)
 
-                    # Debug log
                     try:
                         print("Places API raw response:", places_response.json())
                     except Exception as e:
@@ -218,12 +217,13 @@ def chat():
                                 "rating": place.get("rating")
                             })
                         support["nearby_psychologists"] = results
-                    else:
-                        support["maps_link"] = f"https://www.google.com/maps/search/psychologist+near+{location}"
+
+                    # ✅ Always include Google Maps link
+                    support["maps_link"] = f"https://www.google.com/maps/search/psychologist+near+{location}"
                 else:
                     support["maps_link"] = f"https://www.google.com/maps/search/psychologist+near+{location}"
             else:
-                support["maps_link"] = "https://www.google.com/maps/search/psychologist+near+India"
+                support["maps_link"] = "https://www.google.com/maps/search/psychologist+near+world"
 
         return jsonify({
             "response": ai_reply,
