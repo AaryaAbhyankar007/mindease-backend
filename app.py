@@ -18,10 +18,8 @@ CORS(app)
 # -----------------------------
 def get_db_connection():
     database_url = os.getenv("DATABASE_URL")
-
     if not database_url:
         raise Exception("DATABASE_URL is not set")
-
     return psycopg2.connect(database_url, sslmode="require")
 
 
@@ -68,7 +66,6 @@ def create_tables():
         conn.commit()
         cur.close()
         conn.close()
-
         print("✅ All tables verified/created successfully.")
 
     except Exception as e:
@@ -90,7 +87,6 @@ def home():
 def register():
     try:
         data = request.get_json()
-
         name = data.get("name")
         email = data.get("email")
         password = data.get("password")
@@ -102,12 +98,10 @@ def register():
 
         conn = get_db_connection()
         cur = conn.cursor()
-
         cur.execute(
             "INSERT INTO users (name, email, password) VALUES (%s, %s, %s)",
             (name, email, hashed_password)
         )
-
         conn.commit()
         cur.close()
         conn.close()
@@ -116,7 +110,6 @@ def register():
 
     except psycopg2.errors.UniqueViolation:
         return jsonify({"error": "Email already exists"}), 400
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -128,27 +121,20 @@ def register():
 def login():
     try:
         data = request.get_json()
-
         email = data.get("email")
         password = data.get("password")
 
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-
         cur.execute("SELECT * FROM users WHERE email=%s", (email,))
         user = cur.fetchone()
-
         cur.close()
         conn.close()
 
         if user and check_password_hash(user["password"], password):
-            return jsonify({
-                "message": "Login successful",
-                "user_id": user["id"]
-            })
+            return jsonify({"message": "Login successful", "user_id": user["id"]})
 
         return jsonify({"error": "Invalid credentials"}), 401
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -160,7 +146,6 @@ def login():
 def chat():
     try:
         data = request.get_json()
-
         user_id = data.get("user_id")
         message = data.get("message")
         location = data.get("location")
@@ -171,25 +156,16 @@ def chat():
         # Risk detection
         keywords = ["suicide", "kill myself", "end my life", "want to die"]
         risk_level = "low"
-
         if any(word in message.lower() for word in keywords):
             risk_level = "high"
 
         # AI call
         api_key = os.getenv("GOOGLE_AI_KEY")
-
         if not api_key:
             return jsonify({"error": "AI key missing"}), 500
 
         url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
-
-        payload = {
-            "contents": [{
-                "role": "user",
-                "parts": [{"text": message}]
-            }]
-        }
-
+        payload = {"contents": [{"role": "user", "parts": [{"text": message}]}]}
         response = requests.post(url, json=payload, timeout=30)
 
         if response.status_code != 200:
@@ -201,12 +177,10 @@ def chat():
         # Save chat
         conn = get_db_connection()
         cur = conn.cursor()
-
         cur.execute("""
             INSERT INTO chat_history (user_id, message, response, risk_level)
             VALUES (%s, %s, %s, %s)
         """, (user_id, message, ai_reply, risk_level))
-
         conn.commit()
         cur.close()
         conn.close()
@@ -226,7 +200,6 @@ def chat():
             "emergency": risk_level == "high",
             "support": support
         })
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -238,14 +211,12 @@ def chat():
 def game_score():
     try:
         data = request.get_json()
-
         user_id = data.get("user_id")
         score = data.get("score")
 
         if not user_id or score is None:
             return jsonify({"error": "Required fields missing"}), 400
 
-        # Ensure score is integer
         try:
             score = int(score)
         except ValueError:
@@ -253,18 +224,12 @@ def game_score():
 
         conn = get_db_connection()
         cur = conn.cursor()
-
-        cur.execute("""
-            INSERT INTO game_scores (user_id, score)
-            VALUES (%s, %s)
-        """, (user_id, score))
-
+        cur.execute("INSERT INTO game_scores (user_id, score) VALUES (%s, %s)", (user_id, score))
         conn.commit()
         cur.close()
         conn.close()
 
         return jsonify({"message": "Score saved successfully"})
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -277,21 +242,16 @@ def history(user_id):
     try:
         conn = get_db_connection()
         cur = conn.cursor(cursor_factory=RealDictCursor)
-
         cur.execute("""
             SELECT message, response, risk_level, created_at
             FROM chat_history
             WHERE user_id=%s
             ORDER BY created_at DESC
         """, (user_id,))
-
         chats = cur.fetchall()
-
         cur.close()
         conn.close()
-
         return jsonify(chats)
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
