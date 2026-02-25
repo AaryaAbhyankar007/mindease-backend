@@ -2,14 +2,13 @@ from flask import Flask, request, jsonify
 import psycopg2
 import psycopg2.extras
 import requests
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 from gtts import gTTS
 import speech_recognition as sr
 import datetime
 import os
 
 app = Flask(__name__)
-translator = Translator()
 
 # -------------------------------
 # Database Connection (Postgres)
@@ -95,7 +94,7 @@ def game_score():
 # Multilanguage Support
 # -------------------------------
 def translate_message(message, target_lang="en"):
-    return translator.translate(message, src="auto", dest=target_lang).text
+    return GoogleTranslator(source="auto", target=target_lang).translate(message)
 
 # -------------------------------
 # Voice Input/Output
