@@ -1,295 +1,185 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
-import os
-import requests
 import psycopg2
-from psycopg2.extras import RealDictCursor
-from werkzeug.security import generate_password_hash, check_password_hash
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
+import psycopg2.extras
+import requests
+from googletrans import Translator
+from gtts import gTTS
+import speech_recognition as sr
+import datetime
+import os
 
 app = Flask(__name__)
-CORS(app)
+translator = Translator()
 
-# -----------------------------
-# DATABASE CONNECTION
-# -----------------------------
-def get_db_connection():
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise Exception("DATABASE_URL is not set")
-    return psycopg2.connect(database_url, sslmode="require")
+# -------------------------------
+# Database Connection (Postgres)
+# -------------------------------
+def get_db():
+    conn = psycopg2.connect(
+        host="localhost",              # or your Render/Postgres host
+        database="mindease_db_l1pr",   # your DB name
+        user="postgres",               # your DB username
+        password="your_password"       # your DB password
+    )
+    return conn
 
+# -------------------------------
+# Risk Escalation Logic
+# -------------------------------
+def check_risk_escalation(user_id):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT risk_level FROM chats WHERE user_id=%s ORDER BY created_at DESC LIMIT 3", (user_id,))
+    risks = [row[0] for row in cur.fetchall()]
+    conn.close()
+    return risks.count("high") >= 2
 
-# -----------------------------
-# CREATE TABLES (SAFE)
-# -----------------------------
-def create_tables():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
+# -------------------------------
+# Global Helpline Integration
+# -------------------------------
+def get_global_helpline(location):
+    helplines = {
+        "India": "📞 National Suicide Helpline (India): 9152987821",
+        "US": "📞 National Suicide Prevention Lifeline: 988",
+        "UK": "📞 Samaritans: 116 123",
+        "Japan": "📞 Tokyo English Lifeline: 03-5774-0992"
+    }
+    for country, number in helplines.items():
+        if country.lower() in location.lower():
+            return number
+    return "📞 International Helpline: Please search your local emergency number"
 
-        # Users Table
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(100),
-            email VARCHAR(100) UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        );
-        """)
+# -------------------------------
+# Mood Analytics
+# -------------------------------
+@app.route("/analytics/<int:user_id>", methods=["GET"])
+def analytics(user_id):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    cur.execute("SELECT risk_level, created_at FROM chats WHERE user_id=%s", (user_id,))
+    rows = cur.fetchall()
+    conn.close()
 
-        # Chat History Table
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS chat_history (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            message TEXT,
-            response TEXT,
-            risk_level VARCHAR(20),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
+    summary = {
+        "total_chats": len(rows),
+        "high_risk_count": sum(1 for r in rows if r["risk_level"] == "high"),
+        "trend": [{"risk": r["risk_level"], "time": r["created_at"].isoformat()} for r in rows[-5:]]
+    }
+    return jsonify(summary)
 
-        # Game Scores Table
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS game_scores (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-            score INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """)
-
-        conn.commit()
-        cur.close()
-        conn.close()
-        print("✅ All tables verified/created successfully.")
-
-    except Exception as e:
-        print("❌ Database Setup Error:", e)
-
-
-# Run table creation immediately (works on Render too)
-create_tables()
-
-# -----------------------------
-# HOME ROUTE
-# -----------------------------
-@app.route("/")
-def home():
-    return "MindEase Backend Running Successfully 🚀"
-
-
-# -----------------------------
-# REGISTER
-# -----------------------------
-@app.route("/register", methods=["POST"])
-def register():
-    try:
-        data = request.get_json()
-        name = data.get("name")
-        email = data.get("email")
-        password = data.get("password")
-
-        if not name or not email or not password:
-            return jsonify({"error": "All fields required"}), 400
-
-        hashed_password = generate_password_hash(password)
-
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO users (name, email, password) VALUES (%s, %s, %s)",
-            (name, email, hashed_password)
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return jsonify({"message": "User registered successfully"})
-
-    except psycopg2.errors.UniqueViolation:
-        return jsonify({"error": "Email already exists"}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# -----------------------------
-# LOGIN
-# -----------------------------
-@app.route("/login", methods=["POST"])
-def login():
-    try:
-        data = request.get_json()
-        email = data.get("email")
-        password = data.get("password")
-
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM users WHERE email=%s", (email,))
-        user = cur.fetchone()
-        cur.close()
-        conn.close()
-
-        if user and check_password_hash(user["password"], password):
-            return jsonify({"message": "Login successful", "user_id": user["id"]})
-
-        return jsonify({"error": "Invalid credentials"}), 401
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# -----------------------------
-# CHAT WITH RISK DETECTION
-# -----------------------------
-@app.route("/chat", methods=["POST"])
-def chat():
-    try:
-        data = request.get_json()
-        user_id = data.get("user_id")
-        message = data.get("message")
-        location = data.get("location")
-
-        if not user_id or not message:
-            return jsonify({"error": "Required fields missing"}), 400
-
-        # Risk detection
-        keywords = ["suicide", "kill myself", "end my life", "want to die"]
-        risk_level = "low"
-        if any(word in message.lower() for word in keywords):
-            risk_level = "high"
-
-        # AI call
-        api_key = os.getenv("GOOGLE_AI_KEY")
-        if not api_key:
-            return jsonify({"error": "AI key missing"}), 500
-
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
-        payload = {"contents": [{"role": "user", "parts": [{"text": message}]}]}
-        response = requests.post(url, json=payload, timeout=30)
-
-        if response.status_code != 200:
-            return jsonify({"error": "AI service failed"}), 500
-
-        result = response.json()
-        ai_reply = result["candidates"][0]["content"]["parts"][0]["text"]
-
-        # Save chat
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO chat_history (user_id, message, response, risk_level)
-            VALUES (%s, %s, %s, %s)
-        """, (user_id, message, ai_reply, risk_level))
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        # Emergency Support Info (Global + Maps Link)
-        support = None
-        if risk_level == "high":
-            support = {
-                "helpline": "📞 National Suicide Helpline (India): 9152987821"
-            }
-
-            maps_key = os.getenv("GOOGLE_MAPS_KEY")
-            if location:
-                if maps_key:
-                    # Google Places API call
-                    places_url = f"https://maps.googleapis.com/maps/api/place/textsearch/json?query=psychologist+near+{location}&key={maps_key}"
-                    places_response = requests.get(places_url)
-
-                    try:
-                        print("Places API raw response:", places_response.json())
-                    except Exception as e:
-                        print("❌ Failed to parse Places API response:", e)
-
-                    if places_response.status_code == 200:
-                        places_data = places_response.json()
-                        results = []
-                        for place in places_data.get("results", [])[:3]:  # top 3 results
-                            results.append({
-                                "name": place.get("name"),
-                                "address": place.get("formatted_address"),
-                                "rating": place.get("rating")
-                            })
-                        support["nearby_psychologists"] = results
-
-                    # ✅ Always include Google Maps link
-                    support["maps_link"] = f"https://www.google.com/maps/search/psychologist+near+{location}"
-                else:
-                    support["maps_link"] = f"https://www.google.com/maps/search/psychologist+near+{location}"
-            else:
-                support["maps_link"] = "https://www.google.com/maps/search/psychologist+near+world"
-
-        return jsonify({
-            "response": ai_reply,
-            "risk_level": risk_level,
-            "emergency": risk_level == "high",
-            "support": support
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# -----------------------------
-# GAME SCORE
-# -----------------------------
+# -------------------------------
+# Gamification
+# -------------------------------
 @app.route("/game-score", methods=["POST"])
 def game_score():
-    try:
-        data = request.get_json()
-        user_id = data.get("user_id")
-        score = data.get("score")
+    data = request.json
+    user_id = data["user_id"]
+    score = data["score"]
 
-        if not user_id or score is None:
-            return jsonify({"error": "Required fields missing"}), 400
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO scores (user_id, score, created_at) VALUES (%s, %s, %s)",
+                (user_id, score, datetime.datetime.now()))
+    conn.commit()
+    conn.close()
+
+    badge = None
+    if score >= 80:
+        badge = "Resilience Badge 🏅"
+    elif score >= 50:
+        badge = "Balance Badge 🌱"
+
+    return jsonify({"message": "Score saved successfully", "badge": badge})
+
+# -------------------------------
+# Multilanguage Support
+# -------------------------------
+def translate_message(message, target_lang="en"):
+    return translator.translate(message, src="auto", dest=target_lang).text
+
+# -------------------------------
+# Voice Input/Output
+# -------------------------------
+@app.route("/voice-to-text", methods=["POST"])
+def voice_to_text():
+    audio_file = request.files["file"]
+    recognizer = sr.Recognizer()
+    with sr.AudioFile(audio_file) as source:
+        audio = recognizer.record(source)
+        text = recognizer.recognize_google(audio)
+    return jsonify({"text": text})
+
+@app.route("/text-to-voice", methods=["POST"])
+def text_to_voice():
+    data = request.json
+    text = data["text"]
+    lang = data.get("lang", "en")
+    tts = gTTS(text, lang=lang)
+    filename = "response.mp3"
+    tts.save(filename)
+
+    # Log into voice_logs
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO voice_logs (user_id, transcript, audio_file, created_at) VALUES (%s, %s, %s, %s)",
+                (data["user_id"], text, filename, datetime.datetime.now()))
+    conn.commit()
+    conn.close()
+
+    return jsonify({"audio_file": filename})
+
+# -------------------------------
+# Chat Endpoint
+# -------------------------------
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.json
+    user_id = data["user_id"]
+    message = data["message"]
+    location = data.get("location", "")
+
+    translated_msg = translate_message(message, "en")
+    ai_response = f"I understand you said: {translated_msg}"
+
+    risk_level = "high" if "die" in translated_msg.lower() else "low"
+
+    support = {}
+    if risk_level == "high":
+        support["helpline"] = get_global_helpline(location)
 
         try:
-            score = int(score)
-        except ValueError:
-            return jsonify({"error": "Score must be an integer"}), 400
+            nominatim_url = f"https://nominatim.openstreetmap.org/search?format=json&q=psychologist+near+{location}"
+            response = requests.get(nominatim_url, headers={"User-Agent": "MindEaseApp/1.0"})
+            results = response.json()
+            nearby = []
+            for place in results[:3]:
+                lat, lon = place.get("lat"), place.get("lon")
+                osm_link = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=16/{lat}/{lon}"
+                nearby.append({
+                    "name": place.get("display_name"),
+                    "link": osm_link
+                })
+            support["nearby_psychologists"] = nearby
+            support["maps_link"] = f"https://www.openstreetmap.org/search?query=psychologist+near+{location}"
+        except Exception:
+            support["maps_link"] = f"https://www.openstreetmap.org/search?query=psychologist+near+{location}"
 
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("INSERT INTO game_scores (user_id, score) VALUES (%s, %s)", (user_id, score))
-        conn.commit()
-        cur.close()
-        conn.close()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO chats (user_id, message, response, risk_level, created_at) VALUES (%s, %s, %s, %s, %s)",
+                (user_id, message, ai_response, risk_level, datetime.datetime.now()))
+    conn.commit()
+    conn.close()
 
-        return jsonify({"message": "Score saved successfully"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    emergency = check_risk_escalation(user_id)
+    final_response = translate_message(ai_response, "auto")
 
+    return jsonify({
+        "response": final_response,
+        "risk_level": risk_level,
+        "emergency": emergency,
+        "support": support
+    })
 
-# -----------------------------
-# CHAT HISTORY
-# -----------------------------
-@app.route("/history/<int:user_id>", methods=["GET"])
-def history(user_id):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("""
-            SELECT message, response, risk_level, created_at
-            FROM chat_history
-            WHERE user_id=%s
-            ORDER BY created_at DESC
-        """, (user_id,))
-        chats = cur.fetchall()
-        cur.close()
-        conn.close()
-        return jsonify(chats)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# -----------------------------
-# RUN SERVER
-# -----------------------------
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Render sets PORT, default 5000 locally
-    app.run(host="0.0.0.0", port=port)
+    app.run(debug=True)
