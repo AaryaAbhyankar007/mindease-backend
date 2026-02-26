@@ -136,7 +136,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CHAT (AUTO LANGUAGE, NO BARRIER)
+# CHAT (AUTO LANGUAGE + ALERT FIXED)
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -146,20 +146,18 @@ def chat():
         message = data.get("message")
         location = data.get("location", "")
 
-        # Translate message to English (auto detects source)
+        # Translate message to English
         translator = GoogleTranslator(source="auto", target="en")
         translated = translator.translate(message)
 
         # Detect risk
         risk_level = detect_risk(translated)
 
-        # Create base response
+        # Response in English
         response_text = f"I understand: {translated}"
 
-        # Get detected language
+        # Translate back to original language
         source_lang = translator.source
-
-        # Translate response back to user's language
         final_response = GoogleTranslator(
             source="en",
             target=source_lang
@@ -182,6 +180,7 @@ def chat():
 
         support = {}
 
+        # If risk is high or critical → create alert
         if risk_level in ["high", "critical"]:
 
             support["emergency"] = "Call local emergency services immediately."
@@ -190,10 +189,11 @@ def chat():
                 support["nearby_psychologist"] = \
                     f"https://www.google.com/maps/search/{location} psychologist near me"
 
+            # FIXED ALERT INSERT (matches your table)
             cur.execute("""
-                INSERT INTO alerts (user_id, message, created_at)
+                INSERT INTO alerts (user_id, type, triggered_at)
                 VALUES (%s, %s, %s)
-            """, (user_id, "High/Critical risk detected", datetime.datetime.utcnow()))
+            """, (user_id, risk_level, datetime.datetime.utcnow()))
 
         conn.commit()
         cur.close()
