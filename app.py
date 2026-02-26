@@ -146,14 +146,14 @@ def chat():
         message = data.get("message")
         location = data.get("location", "")
 
-        # Translate message to English
+        # Translate message to English (auto detect)
         translator = GoogleTranslator(source="auto", target="en")
         translated = translator.translate(message)
 
         # Detect risk
         risk_level = detect_risk(translated)
 
-        # Response in English
+        # Base response
         response_text = f"I understand: {translated}"
 
         # Translate back to original language
@@ -180,7 +180,7 @@ def chat():
 
         support = {}
 
-        # If risk is high or critical → create alert
+        # If high or critical → create alert
         if risk_level in ["high", "critical"]:
 
             support["emergency"] = "Call local emergency services immediately."
@@ -189,7 +189,7 @@ def chat():
                 support["nearby_psychologist"] = \
                     f"https://www.google.com/maps/search/{location} psychologist near me"
 
-            # FIXED ALERT INSERT (matches your table)
+            # INSERT MATCHING YOUR ALERTS TABLE
             cur.execute("""
                 INSERT INTO alerts (user_id, type, triggered_at)
                 VALUES (%s, %s, %s)
@@ -203,6 +203,43 @@ def chat():
             "response": final_response,
             "risk_level": risk_level,
             "support": support
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# CHAT HISTORY API
+# =====================================================
+@app.route("/chat-history/<int:user_id>", methods=["GET"])
+def get_chat_history(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        cur.execute("""
+            SELECT id, message, response, created_at
+            FROM chat_history
+            WHERE user_id=%s
+            ORDER BY created_at DESC
+        """, (user_id,))
+
+        rows = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        return jsonify({
+            "user_id": user_id,
+            "history": [
+                {
+                    "id": r["id"],
+                    "message": r["message"],
+                    "response": r["response"],
+                    "created_at": r["created_at"].isoformat()
+                }
+                for r in rows
+            ]
         })
 
     except Exception as e:
