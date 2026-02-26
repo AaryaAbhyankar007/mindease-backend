@@ -20,7 +20,7 @@ def get_db():
 
 
 # -------------------------------
-# Home
+# Home Route
 # -------------------------------
 @app.route("/", methods=["GET"])
 def home():
@@ -28,122 +28,36 @@ def home():
 
 
 # -------------------------------
-# Risk Check
-# -------------------------------
-def check_risk_escalation(user_id):
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT risk_level FROM chats
-            WHERE user_id=%s
-            ORDER BY created_at DESC
-            LIMIT 3
-        """, (user_id,))
-        risks = [r[0] for r in cur.fetchall()]
-        cur.close()
-        conn.close()
-        return risks.count("high") >= 2
-    except:
-        return False
-
-
-# -------------------------------
-# Helpline
-# -------------------------------
-def get_helpline(location):
-    helplines = {
-        "india": "National Suicide Helpline (India): 9152987821",
-        "us": "988 - US Suicide & Crisis Lifeline",
-        "uk": "116 123 - Samaritans",
-    }
-
-    location = location.lower()
-    for country in helplines:
-        if country in location:
-            return helplines[country]
-
-    return "Please contact your local emergency helpline."
-
-
-# -------------------------------
-# Register User
+# Register User (UPDATED)
 # -------------------------------
 @app.route("/register", methods=["POST"])
 def register():
     try:
         data = request.get_json()
-        username = data.get("username")
+        name = data.get("name")
         email = data.get("email")
         password = data.get("password")
 
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO users (username, email, password)
-            VALUES (%s, %s, %s)
-        """, (username, email, password))
+
+        cur.execute(
+            "INSERT INTO users (name, email, password) VALUES (%s, %s, %s)",
+            (name, email, password)
+        )
+
         conn.commit()
         cur.close()
         conn.close()
 
         return jsonify({"message": "User registered successfully"})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 # -------------------------------
-# Save Language Preference
-# -------------------------------
-@app.route("/set-language", methods=["POST"])
-def set_language():
-    try:
-        data = request.get_json()
-        user_id = data.get("user_id")
-        language = data.get("language")
-
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO languages (user_id, language)
-            VALUES (%s, %s)
-        """, (user_id, language))
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return jsonify({"message": "Language saved"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# -------------------------------
-# Game Score
-# -------------------------------
-@app.route("/game-score", methods=["POST"])
-def game_score():
-    try:
-        data = request.get_json()
-        user_id = data.get("user_id")
-        score = data.get("score")
-
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO game_scores (user_id, score, created_at)
-            VALUES (%s, %s, %s)
-        """, (user_id, score, datetime.datetime.utcnow()))
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return jsonify({"message": "Score saved"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# -------------------------------
-# Chat
+# Chat Endpoint
 # -------------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -153,10 +67,9 @@ def chat():
         message = data.get("message")
         location = data.get("location", "")
 
-        # Translation
         translated = GoogleTranslator(source="auto", target="en").translate(message)
 
-        # Risk detection
+        # Risk Detection
         risk_keywords = ["die", "suicide", "kill"]
         risk_level = "high" if any(word in translated.lower() for word in risk_keywords) else "low"
 
@@ -165,19 +78,19 @@ def chat():
         conn = get_db()
         cur = conn.cursor()
 
-        # Save in chats
+        # Insert into chats
         cur.execute("""
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
             VALUES (%s, %s, %s, %s, %s)
         """, (user_id, message, response_text, risk_level, datetime.datetime.utcnow()))
 
-        # Also save in chat_history
+        # Insert into chat_history
         cur.execute("""
             INSERT INTO chat_history (user_id, message, response, created_at)
             VALUES (%s, %s, %s, %s)
         """, (user_id, message, response_text, datetime.datetime.utcnow()))
 
-        # If high risk → create alert
+        # Insert alert if high risk
         if risk_level == "high":
             cur.execute("""
                 INSERT INTO alerts (user_id, message, created_at)
@@ -188,18 +101,38 @@ def chat():
         cur.close()
         conn.close()
 
-        emergency = check_risk_escalation(user_id)
-
-        support = {}
-        if risk_level == "high":
-            support["helpline"] = get_helpline(location)
-
         return jsonify({
             "response": response_text,
-            "risk_level": risk_level,
-            "emergency": emergency,
-            "support": support
+            "risk_level": risk_level
         })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# -------------------------------
+# Game Score (Using game_scores)
+# -------------------------------
+@app.route("/game-score", methods=["POST"])
+def game_score():
+    try:
+        data = request.get_json()
+        user_id = data.get("user_id")
+        score = data.get("score")
+
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO game_scores (user_id, score, created_at)
+            VALUES (%s, %s, %s)
+        """, (user_id, score, datetime.datetime.utcnow()))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": "Score saved"})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -219,6 +152,7 @@ def voice_to_text():
             text = recognizer.recognize_google(audio)
 
         return jsonify({"text": text})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -239,21 +173,24 @@ def text_to_voice():
 
         conn = get_db()
         cur = conn.cursor()
+
         cur.execute("""
             INSERT INTO voice_logs (user_id, transcript, audio_file, created_at)
             VALUES (%s, %s, %s, %s)
         """, (user_id, text, filename, datetime.datetime.utcnow()))
+
         conn.commit()
         cur.close()
         conn.close()
 
         return jsonify({"audio_file": filename})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 # -------------------------------
-# Run
+# Run App
 # -------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
