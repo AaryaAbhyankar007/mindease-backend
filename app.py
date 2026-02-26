@@ -138,28 +138,28 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# SET LANGUAGE
+# SET LANGUAGE (FIXED)
 # =====================================================
 @app.route("/set-language", methods=["POST"])
 def set_language():
     try:
         data = request.get_json()
         user_id = data.get("user_id")
-        language = data.get("language")
+        preferred_lang = data.get("language")
 
         conn = get_db()
         cur = conn.cursor()
 
         cur.execute(
-            "INSERT INTO languages (user_id, language) VALUES (%s, %s)",
-            (user_id, language)
+            "INSERT INTO languages (user_id, preferred_lang) VALUES (%s, %s)",
+            (user_id, preferred_lang)
         )
 
         conn.commit()
         cur.close()
         conn.close()
 
-        return jsonify({"message": "Language saved"})
+        return jsonify({"message": "Language saved successfully"})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -175,12 +175,12 @@ def chat():
         message = data.get("message")
         location = data.get("location", "")
 
-        # Get language preference
         conn = get_db()
         cur = conn.cursor()
 
+        # Get user preferred language
         cur.execute("""
-            SELECT language FROM languages
+            SELECT preferred_lang FROM languages
             WHERE user_id=%s
             ORDER BY id DESC
             LIMIT 1
@@ -189,7 +189,7 @@ def chat():
         lang_row = cur.fetchone()
         target_lang = lang_row[0] if lang_row else "en"
 
-        # Translate
+        # Translate message
         translated = GoogleTranslator(
             source="auto",
             target=target_lang
@@ -199,13 +199,13 @@ def chat():
 
         response_text = f"I understand: {translated}"
 
-        # Save chat
+        # Save in chats
         cur.execute("""
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
             VALUES (%s, %s, %s, %s, %s)
         """, (user_id, message, response_text, risk_level, datetime.datetime.utcnow()))
 
-        # Save history
+        # Save in chat_history
         cur.execute("""
             INSERT INTO chat_history (user_id, message, response, created_at)
             VALUES (%s, %s, %s, %s)
