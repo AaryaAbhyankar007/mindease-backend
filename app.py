@@ -14,16 +14,14 @@ app = Flask(__name__)
 # Database Connection (Postgres)
 # -------------------------------
 def get_db():
-    conn = psycopg2.connect(
-        host="localhost",              # or your Render/Postgres host
-        database="mindease_db_l1pr",   # your DB name
-        user="postgres",               # your DB username
-        password="your_password"       # your DB password
-    )
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise Exception("DATABASE_URL not set in environment variables")
+    conn = psycopg2.connect(db_url)
     return conn
 
 # -------------------------------
-# Home Route (fixes 404 at /)
+# Home Route
 # -------------------------------
 @app.route("/", methods=["GET"])
 def home():
@@ -124,7 +122,6 @@ def text_to_voice():
     filename = "response.mp3"
     tts.save(filename)
 
-    # Log into voice_logs
     conn = get_db()
     cur = conn.cursor()
     cur.execute("INSERT INTO voice_logs (user_id, transcript, audio_file, created_at) VALUES (%s, %s, %s, %s)",
@@ -187,5 +184,9 @@ def chat():
         "support": support
     })
 
+# -------------------------------
+# Run App (Render needs $PORT)
+# -------------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
