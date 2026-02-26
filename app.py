@@ -2,8 +2,6 @@ from flask import Flask, request, jsonify
 import psycopg2
 import psycopg2.extras
 from deep_translator import GoogleTranslator
-from gtts import gTTS
-import speech_recognition as sr
 import datetime
 import os
 import re
@@ -138,34 +136,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# SET LANGUAGE (FIXED)
-# =====================================================
-@app.route("/set-language", methods=["POST"])
-def set_language():
-    try:
-        data = request.get_json()
-        user_id = data.get("user_id")
-        preferred_lang = data.get("language")
-
-        conn = get_db()
-        cur = conn.cursor()
-
-        cur.execute(
-            "INSERT INTO languages (user_id, preferred_lang) VALUES (%s, %s)",
-            (user_id, preferred_lang)
-        )
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return jsonify({"message": "Language saved successfully"})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =====================================================
-# CHAT (FULL SYSTEM)
+# CHAT (AUTO LANGUAGE — NO BARRIER)
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -175,48 +146,47 @@ def chat():
         message = data.get("message")
         location = data.get("location", "")
 
+        # Detect language automatically
+        detected_lang = GoogleTranslator().detect(message)
+
+        # Translate to English for AI processing
+        translated_to_english = GoogleTranslator(
+            source="auto",
+            target="en"
+        ).translate(message)
+
+        # Risk detection
+        risk_level = detect_risk(translated_to_english)
+
+        # Generate response in English
+        response_text = f"I understand: {translated_to_english}"
+
+        # Translate response back to user's language
+        final_response = GoogleTranslator(
+            source="en",
+            target=detected_lang
+        ).translate(response_text)
+
         conn = get_db()
         cur = conn.cursor()
 
-        # Get user preferred language
-        cur.execute("""
-            SELECT preferred_lang FROM languages
-            WHERE user_id=%s
-            ORDER BY id DESC
-            LIMIT 1
-        """, (user_id,))
-
-        lang_row = cur.fetchone()
-        target_lang = lang_row[0] if lang_row else "en"
-
-        # Translate message
-        translated = GoogleTranslator(
-            source="auto",
-            target=target_lang
-        ).translate(message)
-
-        risk_level = detect_risk(translated)
-
-        response_text = f"I understand: {translated}"
-
-        # Save in chats
+        # Save to chats
         cur.execute("""
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
             VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, message, response_text, risk_level, datetime.datetime.utcnow()))
+        """, (user_id, message, final_response, risk_level, datetime.datetime.utcnow()))
 
-        # Save in chat_history
+        # Save to chat_history
         cur.execute("""
             INSERT INTO chat_history (user_id, message, response, created_at)
             VALUES (%s, %s, %s, %s)
-        """, (user_id, message, response_text, datetime.datetime.utcnow()))
+        """, (user_id, message, final_response, datetime.datetime.utcnow()))
 
         support = {}
 
         if risk_level in ["high", "critical"]:
 
             support["emergency"] = "Call local emergency services immediately."
-            support["helpline"] = "India Suicide Helpline: 9152987821"
 
             if location:
                 support["nearby_psychologist"] = \
@@ -225,15 +195,16 @@ def chat():
             cur.execute("""
                 INSERT INTO alerts (user_id, message, created_at)
                 VALUES (%s, %s, %s)
-            """, (user_id, "Critical risk detected", datetime.datetime.utcnow()))
+            """, (user_id, "High/Critical risk detected", datetime.datetime.utcnow()))
 
         conn.commit()
         cur.close()
         conn.close()
 
         return jsonify({
-            "response": response_text,
+            "response": final_response,
             "risk_level": risk_level,
+            "language_detected": detected_lang,
             "support": support
         })
 
@@ -296,24 +267,6 @@ def game_score():
         conn.close()
 
         return jsonify({"message": "Score saved"})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =====================================================
-# VOICE TO TEXT
-# =====================================================
-@app.route("/voice-to-text", methods=["POST"])
-def voice_to_text():
-    try:
-        audio_file = request.files.get("file")
-        recognizer = sr.Recognizer()
-
-        with sr.AudioFile(audio_file) as source:
-            audio = recognizer.record(source)
-            text = recognizer.recognize_google(audio)
-
-        return jsonify({"text": text})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
