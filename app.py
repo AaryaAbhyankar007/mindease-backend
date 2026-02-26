@@ -1,21 +1,33 @@
 from flask import Flask, request, jsonify
 import psycopg2
 import psycopg2.extras
-from deep_translator import GoogleTranslator
 import datetime
 import os
 import re
+from openai import OpenAI
 
 app = Flask(__name__)
+
+# =====================================================
+# ENV VARIABLES
+# =====================================================
+DATABASE_URL = os.environ.get("DATABASE_URL")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+
+if not DATABASE_URL:
+    raise Exception("DATABASE_URL not set")
+
+if not OPENAI_API_KEY:
+    raise Exception("OPENAI_API_KEY not set")
+
+# OpenAI Client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # =====================================================
 # DATABASE CONNECTION
 # =====================================================
 def get_db():
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        raise Exception("DATABASE_URL not set")
-    return psycopg2.connect(db_url)
+    return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
 # HOME
@@ -115,7 +127,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CHAT (MULTILINGUAL + NATURAL RESPONSE)
+# CHAT WITH REAL AI
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -125,37 +137,25 @@ def chat():
         message = data.get("message")
         location = data.get("location", "")
 
-        # Detect language & translate to English
-        translator = GoogleTranslator(source="auto", target="en")
-        translated_message = translator.translate(message)
-        detected_lang = translator.source
+        # Detect Risk
+        risk_level = detect_risk(message)
 
-        # Detect risk
-        risk_level = detect_risk(translated_message)
+        # Send to OpenAI (Real AI)
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a supportive mental health assistant. Respond in the same language as the user. Be empathetic."
+                },
+                {
+                    "role": "user",
+                    "content": message
+                }
+            ]
+        )
 
-        # Create natural base response
-        if risk_level == "critical":
-            base_response = """
-            I understand you are going through a very difficult time.
-            You are not alone. I am here to support you.
-            Please consider reaching out for immediate help.
-            """
-        elif risk_level == "high":
-            base_response = """
-            I understand that you are feeling very stressed.
-            Let me suggest some helpful steps for you.
-            """
-        else:
-            base_response = """
-            I understand how you feel.
-            I am here to listen and support you.
-            """
-
-        # Translate response back to user language
-        final_response = GoogleTranslator(
-            source="en",
-            target=detected_lang
-        ).translate(base_response)
+        ai_response = completion.choices[0].message.content
 
         conn = get_db()
         cur = conn.cursor()
@@ -164,17 +164,17 @@ def chat():
         cur.execute("""
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
             VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, message, final_response, risk_level, datetime.datetime.utcnow()))
+        """, (user_id, message, ai_response, risk_level, datetime.datetime.utcnow()))
 
         # Save to chat_history
         cur.execute("""
             INSERT INTO chat_history (user_id, message, response, created_at)
             VALUES (%s, %s, %s, %s)
-        """, (user_id, message, final_response, datetime.datetime.utcnow()))
+        """, (user_id, message, ai_response, datetime.datetime.utcnow()))
 
         support = {}
 
-        # If critical or high → create alert
+        # If critical → create alert
         if risk_level in ["high", "critical"]:
 
             support["emergency"] = "Call local emergency services immediately."
@@ -193,7 +193,7 @@ def chat():
         conn.close()
 
         return jsonify({
-            "response": final_response,
+            "response": ai_response,
             "risk_level": risk_level,
             "support": support
         })
