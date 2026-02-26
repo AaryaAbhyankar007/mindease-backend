@@ -28,7 +28,7 @@ def home():
 
 
 # -------------------------------
-# Register User (UPDATED)
+# REGISTER
 # -------------------------------
 @app.route("/register", methods=["POST"])
 def register():
@@ -57,7 +57,44 @@ def register():
 
 
 # -------------------------------
-# Chat Endpoint
+# LOGIN
+# -------------------------------
+@app.route("/login", methods=["POST"])
+def login():
+    try:
+        data = request.get_json()
+        email = data.get("email")
+        password = data.get("password")
+
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        cur.execute(
+            "SELECT * FROM users WHERE email=%s AND password=%s",
+            (email, password)
+        )
+
+        user = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        if user:
+            return jsonify({
+                "message": "Login successful",
+                "user_id": user["id"],
+                "name": user["name"],
+                "email": user["email"]
+            })
+        else:
+            return jsonify({"error": "Invalid email or password"}), 401
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# -------------------------------
+# CHAT
 # -------------------------------
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -69,7 +106,6 @@ def chat():
 
         translated = GoogleTranslator(source="auto", target="en").translate(message)
 
-        # Risk Detection
         risk_keywords = ["die", "suicide", "kill"]
         risk_level = "high" if any(word in translated.lower() for word in risk_keywords) else "low"
 
@@ -78,19 +114,19 @@ def chat():
         conn = get_db()
         cur = conn.cursor()
 
-        # Insert into chats
+        # Save in chats
         cur.execute("""
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
             VALUES (%s, %s, %s, %s, %s)
         """, (user_id, message, response_text, risk_level, datetime.datetime.utcnow()))
 
-        # Insert into chat_history
+        # Save in chat_history
         cur.execute("""
             INSERT INTO chat_history (user_id, message, response, created_at)
             VALUES (%s, %s, %s, %s)
         """, (user_id, message, response_text, datetime.datetime.utcnow()))
 
-        # Insert alert if high risk
+        # Create alert if high risk
         if risk_level == "high":
             cur.execute("""
                 INSERT INTO alerts (user_id, message, created_at)
@@ -111,7 +147,7 @@ def chat():
 
 
 # -------------------------------
-# Game Score (Using game_scores)
+# GAME SCORE
 # -------------------------------
 @app.route("/game-score", methods=["POST"])
 def game_score():
@@ -139,7 +175,7 @@ def game_score():
 
 
 # -------------------------------
-# Voice to Text
+# VOICE TO TEXT
 # -------------------------------
 @app.route("/voice-to-text", methods=["POST"])
 def voice_to_text():
@@ -158,7 +194,7 @@ def voice_to_text():
 
 
 # -------------------------------
-# Text to Voice
+# TEXT TO VOICE
 # -------------------------------
 @app.route("/text-to-voice", methods=["POST"])
 def text_to_voice():
@@ -190,7 +226,7 @@ def text_to_voice():
 
 
 # -------------------------------
-# Run App
+# RUN
 # -------------------------------
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
