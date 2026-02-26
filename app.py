@@ -25,27 +25,6 @@ def home():
     return "MindEase Backend Running 🚀"
 
 # =====================================================
-# AI SENTIMENT SCORING
-# =====================================================
-def sentiment_score(text):
-    text = text.lower()
-
-    positive_words = ["happy", "good", "great", "hope", "better", "love"]
-    negative_words = ["sad", "depressed", "alone", "hopeless", "pain", "worthless"]
-
-    score = 0
-
-    for word in positive_words:
-        if re.search(r'\b' + word + r'\b', text):
-            score += 1
-
-    for word in negative_words:
-        if re.search(r'\b' + word + r'\b', text):
-            score -= 1
-
-    return score
-
-# =====================================================
 # RISK DETECTION
 # =====================================================
 def detect_risk(text):
@@ -56,18 +35,18 @@ def detect_risk(text):
         "kill myself",
         "end my life",
         "suicide",
-        "hurt myself",
-        "no reason to live"
+        "hurt myself"
     ]
 
     if any(phrase in text for phrase in critical_phrases):
         return "critical"
 
-    score = sentiment_score(text)
+    negative_words = ["sad", "depressed", "alone", "hopeless", "worthless"]
+    score = sum(1 for word in negative_words if re.search(r'\b' + word + r'\b', text))
 
-    if score <= -2:
+    if score >= 2:
         return "high"
-    elif score < 0:
+    elif score == 1:
         return "medium"
     else:
         return "low"
@@ -136,7 +115,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CHAT (AUTO LANGUAGE + ALERT FIXED)
+# CHAT (MULTILINGUAL + NATURAL RESPONSE)
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -146,22 +125,37 @@ def chat():
         message = data.get("message")
         location = data.get("location", "")
 
-        # Translate message to English (auto detect)
+        # Detect language & translate to English
         translator = GoogleTranslator(source="auto", target="en")
-        translated = translator.translate(message)
+        translated_message = translator.translate(message)
+        detected_lang = translator.source
 
         # Detect risk
-        risk_level = detect_risk(translated)
+        risk_level = detect_risk(translated_message)
 
-        # Base response
-        response_text = f"I understand: {translated}"
+        # Create natural base response
+        if risk_level == "critical":
+            base_response = """
+            I understand you are going through a very difficult time.
+            You are not alone. I am here to support you.
+            Please consider reaching out for immediate help.
+            """
+        elif risk_level == "high":
+            base_response = """
+            I understand that you are feeling very stressed.
+            Let me suggest some helpful steps for you.
+            """
+        else:
+            base_response = """
+            I understand how you feel.
+            I am here to listen and support you.
+            """
 
-        # Translate back to original language
-        source_lang = translator.source
+        # Translate response back to user language
         final_response = GoogleTranslator(
             source="en",
-            target=source_lang
-        ).translate(response_text)
+            target=detected_lang
+        ).translate(base_response)
 
         conn = get_db()
         cur = conn.cursor()
@@ -180,7 +174,7 @@ def chat():
 
         support = {}
 
-        # If high or critical → create alert
+        # If critical or high → create alert
         if risk_level in ["high", "critical"]:
 
             support["emergency"] = "Call local emergency services immediately."
@@ -189,7 +183,6 @@ def chat():
                 support["nearby_psychologist"] = \
                     f"https://www.google.com/maps/search/{location} psychologist near me"
 
-            # INSERT MATCHING YOUR ALERTS TABLE
             cur.execute("""
                 INSERT INTO alerts (user_id, type, triggered_at)
                 VALUES (%s, %s, %s)
@@ -209,10 +202,10 @@ def chat():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CHAT HISTORY API
+# CHAT HISTORY
 # =====================================================
 @app.route("/chat-history/<int:user_id>", methods=["GET"])
-def get_chat_history(user_id):
+def chat_history(user_id):
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
@@ -230,7 +223,6 @@ def get_chat_history(user_id):
         conn.close()
 
         return jsonify({
-            "user_id": user_id,
             "history": [
                 {
                     "id": r["id"],
@@ -255,10 +247,8 @@ def analytics(user_id):
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
         cur.execute("""
-            SELECT risk_level, created_at
-            FROM chats
+            SELECT risk_level FROM chats
             WHERE user_id=%s
-            ORDER BY created_at DESC
         """, (user_id,))
 
         rows = cur.fetchall()
@@ -268,11 +258,7 @@ def analytics(user_id):
 
         return jsonify({
             "total_chats": len(rows),
-            "high_risk_count": sum(1 for r in rows if r["risk_level"] == "high"),
-            "recent_trend": [
-                {"risk": r["risk_level"], "time": r["created_at"].isoformat()}
-                for r in rows[:5]
-            ]
+            "high_risk_count": sum(1 for r in rows if r["risk_level"] == "high")
         })
 
     except Exception as e:
