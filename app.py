@@ -46,7 +46,7 @@ def sentiment_score(text):
     return score
 
 # =====================================================
-# ADVANCED RISK DETECTION
+# RISK DETECTION
 # =====================================================
 def detect_risk(text):
     text = text.lower()
@@ -136,7 +136,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CHAT (AUTO LANGUAGE — NO BARRIER)
+# CHAT (AUTO LANGUAGE, NO BARRIER)
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -146,25 +146,23 @@ def chat():
         message = data.get("message")
         location = data.get("location", "")
 
-        # Detect language automatically
-        detected_lang = GoogleTranslator().detect(message)
+        # Translate message to English (auto detects source)
+        translator = GoogleTranslator(source="auto", target="en")
+        translated = translator.translate(message)
 
-        # Translate to English for AI processing
-        translated_to_english = GoogleTranslator(
-            source="auto",
-            target="en"
-        ).translate(message)
+        # Detect risk
+        risk_level = detect_risk(translated)
 
-        # Risk detection
-        risk_level = detect_risk(translated_to_english)
+        # Create base response
+        response_text = f"I understand: {translated}"
 
-        # Generate response in English
-        response_text = f"I understand: {translated_to_english}"
+        # Get detected language
+        source_lang = translator.source
 
         # Translate response back to user's language
         final_response = GoogleTranslator(
             source="en",
-            target=detected_lang
+            target=source_lang
         ).translate(response_text)
 
         conn = get_db()
@@ -204,7 +202,6 @@ def chat():
         return jsonify({
             "response": final_response,
             "risk_level": risk_level,
-            "language_detected": detected_lang,
             "support": support
         })
 
