@@ -20,7 +20,6 @@ if not DATABASE_URL:
 if not OPENAI_API_KEY:
     raise Exception("OPENAI_API_KEY not set")
 
-# ✅ Configure OpenAI once
 openai.api_key = OPENAI_API_KEY
 
 # =====================================================
@@ -132,7 +131,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CHAT WITH REAL AI (MULTILINGUAL)
+# CHAT WITH REAL AI (MULTILINGUAL + FALLBACK)
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -142,43 +141,43 @@ def chat():
         message = data.get("message")
         location = data.get("location", "")
 
-        # Detect Risk
         risk_level = detect_risk(message)
 
-        # ✅ Use gpt-3.5-turbo (accessible to all accounts)
-        completion = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a supportive mental health assistant. Respond in the same language as the user. Be empathetic."
-                },
-                {
-                    "role": "user",
-                    "content": message
-                }
-            ]
-        )
+        ai_response = None
+        try:
+            completion = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",  # ✅ accessible model
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a supportive mental health assistant. Respond in the same language as the user. Be empathetic."
+                    },
+                    {
+                        "role": "user",
+                        "content": message
+                    }
+                ]
+            )
+            ai_response = completion.choices[0].message["content"]
 
-        ai_response = completion.choices[0].message["content"]
+        except Exception as api_error:
+            # ✅ Fallback if quota exceeded or API fails
+            ai_response = "I'm here for you. I understand you're feeling anxious. Take a deep breath — you're not alone."
 
         conn = get_db()
         cur = conn.cursor()
 
-        # Save to chats
         cur.execute("""
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
             VALUES (%s, %s, %s, %s, %s)
         """, (user_id, message, ai_response, risk_level, datetime.datetime.utcnow()))
 
-        # Save to chat_history
         cur.execute("""
             INSERT INTO chat_history (user_id, message, response, created_at)
             VALUES (%s, %s, %s, %s)
         """, (user_id, message, ai_response, datetime.datetime.utcnow()))
 
         support = {}
-
         if risk_level in ["high", "critical"]:
             support["emergency"] = "Call local emergency services immediately."
             if location:
