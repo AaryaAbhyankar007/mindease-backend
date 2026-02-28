@@ -4,7 +4,7 @@ import psycopg2.extras
 import datetime
 import os
 import re
-import openai   # ✅ stable OpenAI import
+from openai import OpenAI   # ✅ new client import
 
 app = Flask(__name__)
 
@@ -20,8 +20,8 @@ if not DATABASE_URL:
 if not OPENAI_API_KEY:
     raise Exception("OPENAI_API_KEY not set")
 
-# ✅ Configure OpenAI once
-openai.api_key = OPENAI_API_KEY
+# ✅ Initialize OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # =====================================================
 # DATABASE CONNECTION
@@ -42,7 +42,6 @@ def home():
 def detect_risk(text):
     text = text.lower()
 
-    # Critical phrases in multiple languages
     critical_phrases = [
         # English
         "i want to die", "kill myself", "end my life", "suicide", "hurt myself",
@@ -57,7 +56,6 @@ def detect_risk(text):
     if any(phrase in text for phrase in critical_phrases):
         return "critical"
 
-    # Negative words in multiple languages
     negative_words = [
         # English
         "sad", "depressed", "alone", "hopeless", "worthless",
@@ -155,8 +153,8 @@ def chat():
         # Detect Risk
         risk_level = detect_risk(message)
 
-        # ✅ Use OpenAI ChatCompletion with multilingual support
-        completion = openai.ChatCompletion.create(
+        # ✅ Use new OpenAI client interface
+        completion = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
@@ -170,7 +168,7 @@ def chat():
             ]
         )
 
-        ai_response = completion.choices[0].message["content"]
+        ai_response = completion.choices[0].message.content
 
         conn = get_db()
         cur = conn.cursor()
