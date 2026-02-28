@@ -4,7 +4,7 @@ import psycopg2.extras
 import datetime
 import os
 import re
-import openai   # ✅ use the stable openai import
+import openai   # ✅ stable OpenAI import
 
 app = Flask(__name__)
 
@@ -37,23 +37,38 @@ def home():
     return "MindEase Backend Running 🚀"
 
 # =====================================================
-# RISK DETECTION
+# MULTILINGUAL RISK DETECTION
 # =====================================================
 def detect_risk(text):
     text = text.lower()
 
+    # Critical phrases in multiple languages
     critical_phrases = [
-        "i want to die",
-        "kill myself",
-        "end my life",
-        "suicide",
-        "hurt myself"
+        # English
+        "i want to die", "kill myself", "end my life", "suicide", "hurt myself",
+        # Hindi
+        "मुझे मरना है", "आत्महत्या", "खुद को नुकसान पहुँचाना",
+        # Marathi
+        "मला मरायचं आहे", "आत्महत्या करणार", "स्वतःला इजा करणार",
+        # Spanish
+        "quiero morir", "suicidio", "matarme", "hacerme daño"
     ]
 
     if any(phrase in text for phrase in critical_phrases):
         return "critical"
 
-    negative_words = ["sad", "depressed", "alone", "hopeless", "worthless"]
+    # Negative words in multiple languages
+    negative_words = [
+        # English
+        "sad", "depressed", "alone", "hopeless", "worthless",
+        # Hindi
+        "उदास", "निराश", "अकेला", "बेकार",
+        # Marathi
+        "उदास", "निराश", "एकटा", "निरर्थक",
+        # Spanish
+        "triste", "deprimido", "solo", "sin esperanza", "inútil"
+    ]
+
     score = sum(1 for word in negative_words if re.search(r'\b' + word + r'\b', text))
 
     if score >= 2:
@@ -127,7 +142,7 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CHAT WITH REAL AI
+# CHAT WITH REAL AI (MULTILINGUAL)
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -140,7 +155,7 @@ def chat():
         # Detect Risk
         risk_level = detect_risk(message)
 
-        # ✅ Use stable OpenAI ChatCompletion API
+        # ✅ Use OpenAI ChatCompletion with multilingual support
         completion = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
@@ -257,7 +272,7 @@ def analytics(user_id):
 
         return jsonify({
             "total_chats": len(rows),
-            "high_risk_count": sum(1 for r in rows if r["risk_level"] == "high")
+            "high_risk_count": sum(1 for r in rows if r["risk_level"] in ["high", "critical"])
         })
 
     except Exception as e:
