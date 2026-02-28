@@ -4,7 +4,7 @@ import psycopg2.extras
 import datetime
 import os
 import re
-from openai import OpenAI   # ✅ new client import
+import openai   # ✅ old style import
 
 app = Flask(__name__)
 
@@ -20,8 +20,8 @@ if not DATABASE_URL:
 if not OPENAI_API_KEY:
     raise Exception("OPENAI_API_KEY not set")
 
-# ✅ Initialize OpenAI client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# ✅ Configure OpenAI once
+openai.api_key = OPENAI_API_KEY
 
 # =====================================================
 # DATABASE CONNECTION
@@ -153,9 +153,9 @@ def chat():
         # Detect Risk
         risk_level = detect_risk(message)
 
-        # ✅ Use new OpenAI client interface
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+        # ✅ Old SDK style (works with openai==0.28)
+        completion = openai.ChatCompletion.create(
+            model="gpt-4",
             messages=[
                 {
                     "role": "system",
@@ -168,7 +168,7 @@ def chat():
             ]
         )
 
-        ai_response = completion.choices[0].message.content
+        ai_response = completion.choices[0].message["content"]
 
         conn = get_db()
         cur = conn.cursor()
