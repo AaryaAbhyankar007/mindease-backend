@@ -4,7 +4,7 @@ import psycopg2.extras
 import datetime
 import os
 import re
-import openai   # ✅ old style import
+import openai   # ✅ old style import for openai==0.28
 
 app = Flask(__name__)
 
@@ -43,13 +43,9 @@ def detect_risk(text):
     text = text.lower()
 
     critical_phrases = [
-        # English
         "i want to die", "kill myself", "end my life", "suicide", "hurt myself",
-        # Hindi
         "मुझे मरना है", "आत्महत्या", "खुद को नुकसान पहुँचाना",
-        # Marathi
         "मला मरायचं आहे", "आत्महत्या करणार", "स्वतःला इजा करणार",
-        # Spanish
         "quiero morir", "suicidio", "matarme", "hacerme daño"
     ]
 
@@ -57,13 +53,9 @@ def detect_risk(text):
         return "critical"
 
     negative_words = [
-        # English
         "sad", "depressed", "alone", "hopeless", "worthless",
-        # Hindi
         "उदास", "निराश", "अकेला", "बेकार",
-        # Marathi
         "उदास", "निराश", "एकटा", "निरर्थक",
-        # Spanish
         "triste", "deprimido", "solo", "sin esperanza", "inútil"
     ]
 
@@ -153,9 +145,9 @@ def chat():
         # Detect Risk
         risk_level = detect_risk(message)
 
-        # ✅ Old SDK style (works with openai==0.28)
+        # ✅ Use gpt-3.5-turbo (accessible to all accounts)
         completion = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             messages=[
                 {
                     "role": "system",
@@ -187,13 +179,10 @@ def chat():
 
         support = {}
 
-        # If critical → create alert
         if risk_level in ["high", "critical"]:
             support["emergency"] = "Call local emergency services immediately."
-
             if location:
-                support["nearby_psychologist"] = \
-                    f"https://www.google.com/maps/search/{location} psychologist near me"
+                support["nearby_psychologist"] = f"https://www.google.com/maps/search/{location} psychologist near me"
 
             cur.execute("""
                 INSERT INTO alerts (user_id, type, triggered_at)
