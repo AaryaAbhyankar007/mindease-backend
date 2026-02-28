@@ -4,7 +4,7 @@ import psycopg2.extras
 import datetime
 import os
 import re
-from openai import OpenAI
+import openai   # ✅ use the stable openai import
 
 app = Flask(__name__)
 
@@ -20,8 +20,8 @@ if not DATABASE_URL:
 if not OPENAI_API_KEY:
     raise Exception("OPENAI_API_KEY not set")
 
-# OpenAI Client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# ✅ Configure OpenAI once
+openai.api_key = OPENAI_API_KEY
 
 # =====================================================
 # DATABASE CONNECTION
@@ -140,8 +140,8 @@ def chat():
         # Detect Risk
         risk_level = detect_risk(message)
 
-        # Send to OpenAI (Real AI)
-        completion = client.chat.completions.create(
+        # ✅ Use stable OpenAI ChatCompletion API
+        completion = openai.ChatCompletion.create(
             model="gpt-4o-mini",
             messages=[
                 {
@@ -155,7 +155,7 @@ def chat():
             ]
         )
 
-        ai_response = completion.choices[0].message.content
+        ai_response = completion.choices[0].message["content"]
 
         conn = get_db()
         cur = conn.cursor()
@@ -176,7 +176,6 @@ def chat():
 
         # If critical → create alert
         if risk_level in ["high", "critical"]:
-
             support["emergency"] = "Call local emergency services immediately."
 
             if location:
