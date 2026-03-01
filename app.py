@@ -4,19 +4,17 @@ import psycopg2.extras
 import datetime
 import os
 import re
-import openai   # legacy import for openai==0.28
-from dotenv import load_dotenv   # ✅ NEW
+import random
+import openai
+from dotenv import load_dotenv
 
 # =====================================================
-# LOAD .env LOCALLY
+# LOAD ENV
 # =====================================================
-load_dotenv()  # this will read your .env file
+load_dotenv()
 
 app = Flask(__name__)
 
-# =====================================================
-# ENV VARIABLES
-# =====================================================
 DATABASE_URL = os.environ.get("DATABASE_URL")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
@@ -29,27 +27,24 @@ if not OPENAI_API_KEY:
 openai.api_key = OPENAI_API_KEY
 
 # =====================================================
-# DATABASE CONNECTION
+# DATABASE
 # =====================================================
 def get_db():
     return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
-# HEALTH CHECK
+# HEALTH & HOME
 # =====================================================
 @app.route("/health", methods=["GET"])
 def health():
     return "OK", 200
 
-# =====================================================
-# HOME
-# =====================================================
 @app.route("/", methods=["GET"])
 def home():
     return "MindEase Backend Running 🚀"
 
 # =====================================================
-# MULTILINGUAL RISK DETECTION
+# RISK DETECTION
 # =====================================================
 def detect_risk(text):
     text = text.lower()
@@ -57,28 +52,79 @@ def detect_risk(text):
     critical_phrases = [
         "i want to die", "kill myself", "end my life", "suicide", "hurt myself",
         "मुझे मरना है", "आत्महत्या", "खुद को नुकसान पहुँचाना",
-        "मला मरायचं आहे", "आत्महत्या करणार", "स्वतःला इजा करणार",
-        "quiero morir", "suicidio", "matarme", "hacerme daño"
+        "मला मरायचं आहे", "आत्महत्या करणार", "स्वतःला इजा करणार"
     ]
 
-    if any(phrase in text for phrase in critical_phrases):
+    if any(p in text for p in critical_phrases):
         return "critical"
 
     negative_words = [
         "sad", "depressed", "alone", "hopeless", "worthless",
-        "उदास", "निराश", "अकेला", "बेकार",
-        "एकटा", "निरर्थक",
-        "triste", "deprimido", "solo", "sin esperanza", "inútil"
+        "उदास", "निराश", "अकेला",
+        "एकटा", "निरर्थक"
     ]
 
-    score = sum(1 for word in negative_words if re.search(r'\b' + word + r'\b', text))
+    score = sum(1 for w in negative_words if re.search(r'\b' + w + r'\b', text))
 
     if score >= 2:
         return "high"
     elif score == 1:
         return "medium"
+    return "low"
+
+# =====================================================
+# STREAK SYSTEM
+# =====================================================
+def update_streak(user_id):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    today = datetime.date.today()
+
+    cur.execute("SELECT streak, last_active FROM users WHERE id=%s", (user_id,))
+    user = cur.fetchone()
+
+    if not user:
+        return 0
+
+    last_active = user["last_active"]
+    streak = user["streak"] or 0
+
+    if last_active == today:
+        return streak
+
+    if last_active == today - datetime.timedelta(days=1):
+        streak += 1
     else:
-        return "low"
+        streak = 1
+
+    cur.execute("""
+        UPDATE users
+        SET streak=%s, last_active=%s
+        WHERE id=%s
+    """, (streak, today, user_id))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return streak
+
+# =====================================================
+# AI PERSONAL AFFIRMATION
+# =====================================================
+def generate_personal_affirmation(message):
+    try:
+        completion = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Generate a short positive mental health affirmation."},
+                {"role": "user", "content": message}
+            ]
+        )
+        return completion.choices[0].message["content"]
+    except:
+        return "You are capable of overcoming this moment."
 
 # =====================================================
 # REGISTER
@@ -104,7 +150,6 @@ def register():
         conn.close()
 
         return jsonify({"message": "User registered successfully"})
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -127,7 +172,6 @@ def login():
         )
 
         user = cur.fetchone()
-
         cur.close()
         conn.close()
 
@@ -137,14 +181,13 @@ def login():
                 "user_id": user["id"],
                 "name": user["name"]
             })
-        else:
-            return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify({"error": "Invalid credentials"}), 401
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CHAT WITH REAL AI (MULTILINGUAL + FALLBACK)
+# CHAT
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -155,26 +198,20 @@ def chat():
         location = data.get("location", "")
 
         risk_level = detect_risk(message)
+        streak = update_streak(user_id)
+        personal_affirmation = generate_personal_affirmation(message)
 
-        ai_response = None
         try:
             completion = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo",
                 messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a supportive mental health assistant. Respond in the same language as the user. Be empathetic."
-                    },
-                    {
-                        "role": "user",
-                        "content": message
-                    }
+                    {"role": "system", "content": "You are a supportive mental health assistant."},
+                    {"role": "user", "content": message}
                 ]
             )
             ai_response = completion.choices[0].message["content"]
-
-        except Exception:
-            ai_response = "I'm here for you. I understand you're feeling anxious. Take a deep breath — you're not alone."
+        except:
+            ai_response = "I'm here for you. Take a deep breath — you're not alone."
 
         conn = get_db()
         cur = conn.cursor()
@@ -183,11 +220,6 @@ def chat():
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
             VALUES (%s, %s, %s, %s, %s)
         """, (user_id, message, ai_response, risk_level, datetime.datetime.utcnow()))
-
-        cur.execute("""
-            INSERT INTO chat_history (user_id, message, response, created_at)
-            VALUES (%s, %s, %s, %s)
-        """, (user_id, message, ai_response, datetime.datetime.utcnow()))
 
         support = {}
         if risk_level in ["high", "critical"]:
@@ -207,6 +239,8 @@ def chat():
         return jsonify({
             "response": ai_response,
             "risk_level": risk_level,
+            "streak": streak,
+            "personal_affirmation": personal_affirmation,
             "support": support
         })
 
@@ -224,33 +258,55 @@ def chat_history(user_id):
 
         cur.execute("""
             SELECT id, message, response, created_at
-            FROM chat_history
+            FROM chats
             WHERE user_id=%s
             ORDER BY created_at DESC
         """, (user_id,))
 
         rows = cur.fetchall()
-
         cur.close()
         conn.close()
 
-        return jsonify({
-            "history": [
-                {
-                    "id": r["id"],
-                    "message": r["message"],
-                    "response": r["response"],
-                    "created_at": r["created_at"].isoformat()
-                }
-                for r in rows
-            ]
-        })
+        return jsonify({"history": rows})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# ANALYTICS
+# MOOD GRAPH
+# =====================================================
+@app.route("/mood-graph/<int:user_id>", methods=["GET"])
+def mood_graph(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        cur.execute("""
+            SELECT DATE(created_at) as date, risk_level
+            FROM chats
+            WHERE user_id=%s
+            ORDER BY created_at ASC
+        """, (user_id,))
+
+        rows = cur.fetchall()
+
+        mood_map = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+
+        graph_data = [
+            {"date": str(r["date"]), "mood_score": mood_map.get(r["risk_level"], 1)}
+            for r in rows
+        ]
+
+        cur.close()
+        conn.close()
+
+        return jsonify({"graph": graph_data})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# ANALYTICS + ACHIEVEMENTS
 # =====================================================
 @app.route("/analytics/<int:user_id>", methods=["GET"])
 def analytics(user_id):
@@ -258,23 +314,58 @@ def analytics(user_id):
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        cur.execute("""
-            SELECT risk_level FROM chats
-            WHERE user_id=%s
-        """, (user_id,))
-
+        cur.execute("SELECT risk_level FROM chats WHERE user_id=%s", (user_id,))
         rows = cur.fetchall()
+
+        total_chats = len(rows)
+        high_risk_count = sum(1 for r in rows if r["risk_level"] in ["high", "critical"])
+
+        overall_risk = "low"
+        if total_chats > 0:
+            ratio = high_risk_count / total_chats
+            if ratio >= 0.5:
+                overall_risk = "high"
+            elif ratio >= 0.25:
+                overall_risk = "medium"
+
+        cur.execute("SELECT streak FROM users WHERE id=%s", (user_id,))
+        streak_data = cur.fetchone()
+        streak = streak_data["streak"] if streak_data else 0
+
+        achievements = []
+        if streak >= 7:
+            achievements.append("🔥 7-Day Streak!")
+        if total_chats >= 20:
+            achievements.append("💬 20 Chats Completed!")
+        if high_risk_count == 0 and total_chats >= 10:
+            achievements.append("🌤 Stable Mood!")
 
         cur.close()
         conn.close()
 
         return jsonify({
-            "total_chats": len(rows),
-            "high_risk_count": sum(1 for r in rows if r["risk_level"] in ["high", "critical"])
+            "total_chats": total_chats,
+            "high_risk_count": high_risk_count,
+            "overall_risk": overall_risk,
+            "streak": streak,
+            "achievements": achievements
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# DAILY MOTIVATION
+# =====================================================
+@app.route("/daily-motivation/<int:user_id>", methods=["GET"])
+def daily_motivation(user_id):
+    messages = [
+        "Today is a new opportunity to grow.",
+        "Small progress is still progress.",
+        "You are stronger than yesterday.",
+        "Keep moving forward — you’re doing great."
+    ]
+    return jsonify({"message": random.choice(messages)})
 
 # =====================================================
 # GAME SCORE
