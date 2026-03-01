@@ -6,6 +6,7 @@ import os
 import re
 from dotenv import load_dotenv
 from openai import OpenAI
+import random
 
 # =====================================================
 # LOAD ENV
@@ -32,19 +33,41 @@ def get_db():
     return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
+# HEALTH CHECK
+# =====================================================
+@app.route("/health", methods=["GET"])
+def health():
+    return "OK", 200
+
+# =====================================================
+# HOME
+# =====================================================
+@app.route("/", methods=["GET"])
+def home():
+    return "MindEase Backend Running 🚀"
+
+# =====================================================
 # RISK DETECTION
 # =====================================================
 def detect_risk(text):
     text = text.lower()
 
     critical_phrases = [
-        "i want to die", "kill myself", "suicide", "hurt myself"
+        "i want to die", "kill myself", "suicide", "hurt myself",
+        "मुझे मरना है", "आत्महत्या", "खुद को नुकसान पहुँचाना",
+        "मला मरायचं आहे", "आत्महत्या करणार", "स्वतःला इजा करणार",
+        "quiero morir", "suicidio", "matarme", "hacerme daño"
     ]
 
     if any(p in text for p in critical_phrases):
         return "critical"
 
-    negative_words = ["sad", "depressed", "alone", "hopeless"]
+    negative_words = [
+        "sad", "depressed", "alone", "hopeless", "worthless",
+        "उदास", "निराश", "अकेला", "बेकार",
+        "एकटा", "निरर्थक",
+        "triste", "deprimido", "solo", "sin esperanza", "inútil"
+    ]
 
     score = sum(1 for w in negative_words if w in text)
 
@@ -133,8 +156,6 @@ Generate 3 short personalized recommendations.
         )
 
         text = response.choices[0].message.content.strip()
-
-        # Convert numbered text to list
         recommendations = [r.strip("-•1234567890. ") for r in text.split("\n") if r.strip()]
 
         return recommendations[:3]
@@ -173,22 +194,11 @@ def chat():
         message = data.get("message")
 
         risk_level = detect_risk(message)
-
-        # Fetch user history
         user_history = get_user_recent_messages(user_id)
 
-        # AI response
         ai_response = generate_ai_response(message)
-
-        # Personalized AI quote
         personalized_quote = generate_personalized_quote(user_history, message)
-
-        # Dynamic AI recommendations
-        dynamic_recommendations = generate_dynamic_recommendations(
-            user_history,
-            message,
-            risk_level
-        )
+        dynamic_recommendations = generate_dynamic_recommendations(user_history, message, risk_level)
 
         conn = get_db()
         cur = conn.cursor()
@@ -207,6 +217,62 @@ def chat():
             "risk_level": risk_level,
             "personalized_quote": personalized_quote,
             "recommendations": dynamic_recommendations
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# ANALYTICS WITH AFFIRMATIONS, QUOTES & RECOMMENDATIONS
+# =====================================================
+@app.route("/analytics/<int:user_id>", methods=["GET"])
+def analytics(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        cur.execute("""
+            SELECT risk_level FROM chats
+            WHERE user_id=%s
+        """, (user_id,))
+
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        total_chats = len(rows)
+        high_risk_count = sum(1 for r in rows if r["risk_level"] in ["high", "critical"])
+
+        affirmations = [
+            "You are stronger than you think.",
+            "Every day is a new beginning.",
+            "Your feelings are valid, and you matter.",
+            "Keep going — you’re doing better than you realize.",
+            "Hope is always within reach.",
+            "You are not alone on this journey."
+        ]
+
+        quotes = [
+            "The best way out is always through. – Robert Frost",
+            "Believe you can and you're halfway there. – Theodore Roosevelt",
+            "Keep your face always toward the sunshine—and shadows will fall behind you. – Walt Whitman"
+        ]
+
+        recommendations = [
+            "Try a short mindfulness exercise today.",
+            "Take a walk outside and notice your surroundings.",
+            "Write down three things you’re grateful for.",
+            "Listen to calming music for 10 minutes."
+        ]
+
+        suggestion = random.choice(affirmations)
+
+        return jsonify({
+            "total_chats": total_chats,
+            "high_risk_count": high_risk_count,
+            "suggestion": suggestion,
+            "quotes": random.sample(quotes, 2),
+            "recommendations": random.sample(recommendations, 2)
         })
 
     except Exception as e:
