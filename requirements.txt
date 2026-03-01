@@ -7,3 +7,4 @@ deep-translator==1.11.4
 gTTS==2.5.3
 SpeechRecognition==3.10.4
 openai==0.28
+python-dotenv==1.0.1   # ✅ Added for .env support
