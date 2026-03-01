@@ -4,9 +4,8 @@ import psycopg2.extras
 import datetime
 import os
 import re
-import random
-import openai
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # =====================================================
 # LOAD ENV
@@ -24,7 +23,7 @@ if not DATABASE_URL:
 if not OPENAI_API_KEY:
     raise Exception("OPENAI_API_KEY not set")
 
-openai.api_key = OPENAI_API_KEY
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # =====================================================
 # DATABASE
@@ -33,38 +32,21 @@ def get_db():
     return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
-# HEALTH & HOME
-# =====================================================
-@app.route("/health", methods=["GET"])
-def health():
-    return "OK", 200
-
-@app.route("/", methods=["GET"])
-def home():
-    return "MindEase Backend Running 🚀"
-
-# =====================================================
 # RISK DETECTION
 # =====================================================
 def detect_risk(text):
     text = text.lower()
 
     critical_phrases = [
-        "i want to die", "kill myself", "end my life", "suicide", "hurt myself",
-        "मुझे मरना है", "आत्महत्या", "खुद को नुकसान पहुँचाना",
-        "मला मरायचं आहे", "आत्महत्या करणार", "स्वतःला इजा करणार"
+        "i want to die", "kill myself", "suicide", "hurt myself"
     ]
 
     if any(p in text for p in critical_phrases):
         return "critical"
 
-    negative_words = [
-        "sad", "depressed", "alone", "hopeless", "worthless",
-        "उदास", "निराश", "अकेला",
-        "एकटा", "निरर्थक"
-    ]
+    negative_words = ["sad", "depressed", "alone", "hopeless"]
 
-    score = sum(1 for w in negative_words if re.search(r'\b' + w + r'\b', text))
+    score = sum(1 for w in negative_words if w in text)
 
     if score >= 2:
         return "high"
@@ -73,121 +55,115 @@ def detect_risk(text):
     return "low"
 
 # =====================================================
-# STREAK SYSTEM
+# FETCH USER HISTORY CONTEXT
 # =====================================================
-def update_streak(user_id):
+def get_user_recent_messages(user_id):
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    today = datetime.date.today()
-
-    cur.execute("SELECT streak, last_active FROM users WHERE id=%s", (user_id,))
-    user = cur.fetchone()
-
-    if not user:
-        return 0
-
-    last_active = user["last_active"]
-    streak = user["streak"] or 0
-
-    if last_active == today:
-        return streak
-
-    if last_active == today - datetime.timedelta(days=1):
-        streak += 1
-    else:
-        streak = 1
-
     cur.execute("""
-        UPDATE users
-        SET streak=%s, last_active=%s
-        WHERE id=%s
-    """, (streak, today, user_id))
+        SELECT message
+        FROM chats
+        WHERE user_id=%s
+        ORDER BY created_at DESC
+        LIMIT 5
+    """, (user_id,))
 
-    conn.commit()
+    rows = cur.fetchall()
     cur.close()
     conn.close()
 
-    return streak
+    return [r["message"] for r in rows]
 
 # =====================================================
-# AI PERSONAL AFFIRMATION
+# AI PERSONALIZED QUOTE
 # =====================================================
-def generate_personal_affirmation(message):
+def generate_personalized_quote(user_history, current_message):
     try:
-        completion = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+        context = "\n".join(user_history)
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Generate a short positive mental health affirmation."},
+                {
+                    "role": "system",
+                    "content": "You generate short, powerful, emotionally supportive motivational quotes based on user's emotional history."
+                },
+                {
+                    "role": "user",
+                    "content": f"User previous emotions:\n{context}\n\nCurrent message:\n{current_message}\n\nGenerate 1 short personalized motivational quote."
+                }
+            ]
+        )
+
+        return response.choices[0].message.content.strip()
+
+    except:
+        return "You are stronger than this moment."
+
+# =====================================================
+# AI DYNAMIC RECOMMENDATIONS
+# =====================================================
+def generate_dynamic_recommendations(user_history, current_message, risk_level):
+    try:
+        context = "\n".join(user_history)
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a mental health assistant. Give 3 short practical self-care recommendations. Keep them simple and safe."
+                },
+                {
+                    "role": "user",
+                    "content": f"""
+User emotional history:
+{context}
+
+Current message:
+{current_message}
+
+Risk level: {risk_level}
+
+Generate 3 short personalized recommendations.
+"""
+                }
+            ]
+        )
+
+        text = response.choices[0].message.content.strip()
+
+        # Convert numbered text to list
+        recommendations = [r.strip("-•1234567890. ") for r in text.split("\n") if r.strip()]
+
+        return recommendations[:3]
+
+    except:
+        return [
+            "Take a few slow deep breaths.",
+            "Reach out to someone you trust.",
+            "Be gentle with yourself today."
+        ]
+
+# =====================================================
+# AI CHAT RESPONSE
+# =====================================================
+def generate_ai_response(message):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a deeply empathetic mental health support assistant."},
                 {"role": "user", "content": message}
             ]
         )
-        return completion.choices[0].message["content"]
+        return response.choices[0].message.content
     except:
-        return "You are capable of overcoming this moment."
+        return "I'm here for you. You’re not alone."
 
 # =====================================================
-# REGISTER
-# =====================================================
-@app.route("/register", methods=["POST"])
-def register():
-    try:
-        data = request.get_json()
-        name = data.get("name")
-        email = data.get("email")
-        password = data.get("password")
-
-        conn = get_db()
-        cur = conn.cursor()
-
-        cur.execute(
-            "INSERT INTO users (name, email, password) VALUES (%s, %s, %s)",
-            (name, email, password)
-        )
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return jsonify({"message": "User registered successfully"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =====================================================
-# LOGIN
-# =====================================================
-@app.route("/login", methods=["POST"])
-def login():
-    try:
-        data = request.get_json()
-        email = data.get("email")
-        password = data.get("password")
-
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-        cur.execute(
-            "SELECT * FROM users WHERE email=%s AND password=%s",
-            (email, password)
-        )
-
-        user = cur.fetchone()
-        cur.close()
-        conn.close()
-
-        if user:
-            return jsonify({
-                "message": "Login successful",
-                "user_id": user["id"],
-                "name": user["name"]
-            })
-        return jsonify({"error": "Invalid credentials"}), 401
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =====================================================
-# CHAT
+# CHAT (FULLY UPGRADED)
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -195,23 +171,24 @@ def chat():
         data = request.get_json()
         user_id = data.get("user_id")
         message = data.get("message")
-        location = data.get("location", "")
 
         risk_level = detect_risk(message)
-        streak = update_streak(user_id)
-        personal_affirmation = generate_personal_affirmation(message)
 
-        try:
-            completion = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are a supportive mental health assistant."},
-                    {"role": "user", "content": message}
-                ]
-            )
-            ai_response = completion.choices[0].message["content"]
-        except:
-            ai_response = "I'm here for you. Take a deep breath — you're not alone."
+        # Fetch user history
+        user_history = get_user_recent_messages(user_id)
+
+        # AI response
+        ai_response = generate_ai_response(message)
+
+        # Personalized AI quote
+        personalized_quote = generate_personalized_quote(user_history, message)
+
+        # Dynamic AI recommendations
+        dynamic_recommendations = generate_dynamic_recommendations(
+            user_history,
+            message,
+            risk_level
+        )
 
         conn = get_db()
         cur = conn.cursor()
@@ -221,17 +198,6 @@ def chat():
             VALUES (%s, %s, %s, %s, %s)
         """, (user_id, message, ai_response, risk_level, datetime.datetime.utcnow()))
 
-        support = {}
-        if risk_level in ["high", "critical"]:
-            support["emergency"] = "Call local emergency services immediately."
-            if location:
-                support["nearby_psychologist"] = f"https://www.google.com/maps/search/{location} psychologist near me"
-
-            cur.execute("""
-                INSERT INTO alerts (user_id, type, triggered_at)
-                VALUES (%s, %s, %s)
-            """, (user_id, risk_level, datetime.datetime.utcnow()))
-
         conn.commit()
         cur.close()
         conn.close()
@@ -239,157 +205,9 @@ def chat():
         return jsonify({
             "response": ai_response,
             "risk_level": risk_level,
-            "streak": streak,
-            "personal_affirmation": personal_affirmation,
-            "support": support
+            "personalized_quote": personalized_quote,
+            "recommendations": dynamic_recommendations
         })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =====================================================
-# CHAT HISTORY
-# =====================================================
-@app.route("/chat-history/<int:user_id>", methods=["GET"])
-def chat_history(user_id):
-    try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-        cur.execute("""
-            SELECT id, message, response, created_at
-            FROM chats
-            WHERE user_id=%s
-            ORDER BY created_at DESC
-        """, (user_id,))
-
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-
-        return jsonify({"history": rows})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =====================================================
-# MOOD GRAPH
-# =====================================================
-@app.route("/mood-graph/<int:user_id>", methods=["GET"])
-def mood_graph(user_id):
-    try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-        cur.execute("""
-            SELECT DATE(created_at) as date, risk_level
-            FROM chats
-            WHERE user_id=%s
-            ORDER BY created_at ASC
-        """, (user_id,))
-
-        rows = cur.fetchall()
-
-        mood_map = {"low": 1, "medium": 2, "high": 3, "critical": 4}
-
-        graph_data = [
-            {"date": str(r["date"]), "mood_score": mood_map.get(r["risk_level"], 1)}
-            for r in rows
-        ]
-
-        cur.close()
-        conn.close()
-
-        return jsonify({"graph": graph_data})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =====================================================
-# ANALYTICS + ACHIEVEMENTS
-# =====================================================
-@app.route("/analytics/<int:user_id>", methods=["GET"])
-def analytics(user_id):
-    try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
-        cur.execute("SELECT risk_level FROM chats WHERE user_id=%s", (user_id,))
-        rows = cur.fetchall()
-
-        total_chats = len(rows)
-        high_risk_count = sum(1 for r in rows if r["risk_level"] in ["high", "critical"])
-
-        overall_risk = "low"
-        if total_chats > 0:
-            ratio = high_risk_count / total_chats
-            if ratio >= 0.5:
-                overall_risk = "high"
-            elif ratio >= 0.25:
-                overall_risk = "medium"
-
-        cur.execute("SELECT streak FROM users WHERE id=%s", (user_id,))
-        streak_data = cur.fetchone()
-        streak = streak_data["streak"] if streak_data else 0
-
-        achievements = []
-        if streak >= 7:
-            achievements.append("🔥 7-Day Streak!")
-        if total_chats >= 20:
-            achievements.append("💬 20 Chats Completed!")
-        if high_risk_count == 0 and total_chats >= 10:
-            achievements.append("🌤 Stable Mood!")
-
-        cur.close()
-        conn.close()
-
-        return jsonify({
-            "total_chats": total_chats,
-            "high_risk_count": high_risk_count,
-            "overall_risk": overall_risk,
-            "streak": streak,
-            "achievements": achievements
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# =====================================================
-# DAILY MOTIVATION
-# =====================================================
-@app.route("/daily-motivation/<int:user_id>", methods=["GET"])
-def daily_motivation(user_id):
-    messages = [
-        "Today is a new opportunity to grow.",
-        "Small progress is still progress.",
-        "You are stronger than yesterday.",
-        "Keep moving forward — you’re doing great."
-    ]
-    return jsonify({"message": random.choice(messages)})
-
-# =====================================================
-# GAME SCORE
-# =====================================================
-@app.route("/game-score", methods=["POST"])
-def game_score():
-    try:
-        data = request.get_json()
-        user_id = data.get("user_id")
-        score = data.get("score")
-
-        conn = get_db()
-        cur = conn.cursor()
-
-        cur.execute("""
-            INSERT INTO game_scores (user_id, score, created_at)
-            VALUES (%s, %s, %s)
-        """, (user_id, score, datetime.datetime.utcnow()))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return jsonify({"message": "Score saved"})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
