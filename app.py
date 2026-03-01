@@ -5,6 +5,7 @@ import datetime
 import os
 import random
 from dotenv import load_dotenv
+from deep_translator import GoogleTranslator
 
 # =====================================================
 # LOAD ENV
@@ -23,25 +24,22 @@ def get_db():
     return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
-# GLOBAL ERROR HANDLER
+# ERROR HANDLER
 # =====================================================
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Endpoint not found"}), 404
 
 # =====================================================
-# HEALTH CHECK
-# =====================================================
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "OK"})
-
-# =====================================================
-# HOME
+# HOME & HEALTH
 # =====================================================
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "MindEase Backend Running 🚀"})
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "OK"})
 
 # =====================================================
 # REGISTER
@@ -57,7 +55,6 @@ def register():
         conn = get_db()
         cur = conn.cursor()
 
-        # Check existing email
         cur.execute("SELECT id FROM users WHERE email=%s", (email,))
         if cur.fetchone():
             return jsonify({"error": "Email already exists"}), 400
@@ -72,7 +69,6 @@ def register():
         conn.close()
 
         return jsonify({"message": "User registered successfully"})
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -106,9 +102,25 @@ def login():
             })
 
         return jsonify({"error": "Invalid credentials"}), 401
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# LANGUAGE SUPPORT
+# =====================================================
+def detect_language(text):
+    try:
+        translator = GoogleTranslator(source='auto', target='en')
+        translator.translate(text)
+        return translator.source
+    except:
+        return "en"
+
+def translate_text(text, target_lang):
+    try:
+        return GoogleTranslator(source='auto', target=target_lang).translate(text)
+    except:
+        return text
 
 # =====================================================
 # RISK DETECTION
@@ -116,48 +128,76 @@ def login():
 def detect_risk(text):
     text = text.lower()
 
-    critical_words = ["i want to die", "kill myself", "suicide"]
-    high_words = ["hopeless", "worthless"]
-    medium_words = ["sad", "alone", "depressed"]
-
-    if any(w in text for w in critical_words):
+    if any(x in text for x in ["i want to die", "kill myself", "suicide"]):
         return "critical"
-    if any(w in text for w in high_words):
+    if any(x in text for x in ["hopeless", "worthless"]):
         return "high"
-    if any(w in text for w in medium_words):
+    if any(x in text for x in ["sad", "alone", "depressed"]):
         return "medium"
     return "low"
 
 # =====================================================
-# AI SIMULATION
+# PERSONALIZED ENGINE
 # =====================================================
-def generate_ai_response(risk):
-    responses = {
-        "low": "I'm here to listen. Tell me more.",
-        "medium": "I understand this feels heavy. You're not alone.",
-        "high": "That sounds very difficult. Please consider reaching out to someone you trust.",
-        "critical": "I'm really concerned. Please seek immediate help or contact a crisis helpline."
+def get_user_emotional_stats(user_id):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cur.execute("SELECT risk_level FROM chats WHERE user_id=%s", (user_id,))
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return {
+        "total": len(rows),
+        "critical": sum(1 for r in rows if r["risk_level"] == "critical"),
+        "high": sum(1 for r in rows if r["risk_level"] == "high"),
+        "medium": sum(1 for r in rows if r["risk_level"] == "medium")
     }
-    return responses.get(risk)
 
-def generate_quote():
-    quotes = [
-        "You are stronger than you think.",
-        "Progress, not perfection.",
-        "Your feelings are valid.",
-        "Even tough days are part of growth."
+def generate_personalized_affirmation(risk, stats):
+    if risk == "critical":
+        return "You matter more than you realize. Please seek help immediately."
+    if stats["high"] > stats["medium"]:
+        return "You've been handling a lot. That shows strength."
+    if stats["medium"] > 3:
+        return "You're trying even when it's hard. That matters."
+    return "You are growing stronger every day."
+
+def generate_personalized_recommendations(risk, stats):
+    if risk == "critical":
+        return [
+            "Contact emergency services immediately",
+            "Reach out to someone you trust right now",
+            "Use the helpline below"
+        ]
+    if risk == "high":
+        return [
+            "Consider speaking to a counselor",
+            "Avoid staying alone today",
+            "Write your thoughts in a journal"
+        ]
+    if stats["medium"] > 2:
+        return [
+            "Practice mindful breathing",
+            "Take a short walk outside",
+            "Listen to calming music"
+        ]
+    return [
+        "Maintain your routine",
+        "Practice gratitude",
+        "Do something you enjoy"
     ]
-    return random.choice(quotes)
 
-def generate_recommendations(risk):
-    if risk == "low":
-        return ["Take a short walk", "Listen to music"]
-    elif risk == "medium":
-        return ["Practice deep breathing", "Call a friend"]
-    elif risk == "high":
-        return ["Talk to a counselor", "Avoid being alone"]
-    else:
-        return ["Contact emergency services", "Reach out to a helpline"]
+# =====================================================
+# EMERGENCY LINKS
+# =====================================================
+def get_psychologist_link():
+    return "https://www.google.com/maps/search/psychologist+near+me"
+
+def get_helpline_link():
+    return "https://www.iasp.info/resources/Crisis_Centres/"
 
 # =====================================================
 # CHAT
@@ -169,28 +209,41 @@ def chat():
         user_id = data["user_id"]
         message = data["message"]
 
-        risk = detect_risk(message)
-        ai_response = generate_ai_response(risk)
-        quote = generate_quote()
-        recommendations = generate_recommendations(risk)
+        user_lang = detect_language(message)
+        message_en = translate_text(message, "en")
+
+        risk = detect_risk(message_en)
+        stats = get_user_emotional_stats(user_id)
+
+        affirmation_en = generate_personalized_affirmation(risk, stats)
+        recommendations_en = generate_personalized_recommendations(risk, stats)
+
+        emergency_links = None
+        if risk == "critical":
+            emergency_links = {
+                "nearest_psychologist": get_psychologist_link(),
+                "global_helpline_directory": get_helpline_link()
+            }
+
+        affirmation = translate_text(affirmation_en, user_lang)
+        recommendations = [translate_text(r, user_lang) for r in recommendations_en]
 
         conn = get_db()
         cur = conn.cursor()
-
         cur.execute("""
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
             VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, message, ai_response, risk, datetime.datetime.utcnow()))
-
+        """, (user_id, message, affirmation, risk, datetime.datetime.utcnow()))
         conn.commit()
         cur.close()
         conn.close()
 
         return jsonify({
-            "response": ai_response,
+            "response": affirmation,
             "risk_level": risk,
-            "personalized_quote": quote,
-            "recommendations": recommendations
+            "language_detected": user_lang,
+            "recommendations": recommendations,
+            "emergency_resources": emergency_links
         })
 
     except Exception as e:
@@ -203,18 +256,15 @@ def chat():
 def chat_history(user_id):
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
     cur.execute("""
         SELECT message, response, risk_level, created_at
         FROM chats
         WHERE user_id=%s
         ORDER BY created_at DESC
     """, (user_id,))
-
     rows = cur.fetchall()
     cur.close()
     conn.close()
-
     return jsonify({"history": rows})
 
 # =====================================================
@@ -224,7 +274,6 @@ def chat_history(user_id):
 def analytics(user_id):
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
     cur.execute("SELECT risk_level FROM chats WHERE user_id=%s", (user_id,))
     rows = cur.fetchall()
 
@@ -237,11 +286,11 @@ def analytics(user_id):
     return jsonify({
         "total_chats": total,
         "high_risk_chats": high_risk,
-        "mental_state": "Improving" if high_risk < total/2 else "Needs Attention"
+        "mental_state": "Improving" if total == 0 or high_risk < total/2 else "Needs Attention"
     })
 
 # =====================================================
-# SAVE GAME SCORE
+# GAME SCORE
 # =====================================================
 @app.route("/game-score", methods=["POST"])
 def save_score():
@@ -252,40 +301,31 @@ def save_score():
 
         conn = get_db()
         cur = conn.cursor()
-
         cur.execute("""
             INSERT INTO game_scores (user_id, score, created_at)
             VALUES (%s, %s, %s)
         """, (user_id, score, datetime.datetime.utcnow()))
-
         conn.commit()
         cur.close()
         conn.close()
 
         return jsonify({"message": "Score saved successfully"})
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# =====================================================
-# GET GAME SCORES
-# =====================================================
 @app.route("/game-scores/<int:user_id>", methods=["GET"])
 def get_scores(user_id):
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-
     cur.execute("""
         SELECT score, created_at
         FROM game_scores
         WHERE user_id=%s
         ORDER BY created_at DESC
     """, (user_id,))
-
     rows = cur.fetchall()
     cur.close()
     conn.close()
-
     return jsonify({"scores": rows})
 
 # =====================================================
