@@ -4,7 +4,7 @@ import psycopg2.extras
 import datetime
 import os
 import re
-import openai   # ✅ old style import for openai==0.28
+import openai   # ✅ legacy import for openai==0.28
 
 app = Flask(__name__)
 
@@ -27,6 +27,13 @@ openai.api_key = OPENAI_API_KEY
 # =====================================================
 def get_db():
     return psycopg2.connect(DATABASE_URL)
+
+# =====================================================
+# HEALTH CHECK
+# =====================================================
+@app.route("/health", methods=["GET"])
+def health():
+    return "OK", 200
 
 # =====================================================
 # HOME
@@ -54,7 +61,7 @@ def detect_risk(text):
     negative_words = [
         "sad", "depressed", "alone", "hopeless", "worthless",
         "उदास", "निराश", "अकेला", "बेकार",
-        "उदास", "निराश", "एकटा", "निरर्थक",
+        "एकटा", "निरर्थक",
         "triste", "deprimido", "solo", "sin esperanza", "inútil"
     ]
 
@@ -146,7 +153,7 @@ def chat():
         ai_response = None
         try:
             completion = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",  # ✅ accessible model
+                model="gpt-3.5-turbo",
                 messages=[
                     {
                         "role": "system",
@@ -160,8 +167,7 @@ def chat():
             )
             ai_response = completion.choices[0].message["content"]
 
-        except Exception as api_error:
-            # ✅ Fallback if quota exceeded or API fails
+        except Exception:
             ai_response = "I'm here for you. I understand you're feeling anxious. Take a deep breath — you're not alone."
 
         conn = get_db()
