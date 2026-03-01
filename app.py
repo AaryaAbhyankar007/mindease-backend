@@ -4,7 +4,13 @@ import psycopg2.extras
 import datetime
 import os
 import re
-import openai   # ✅ legacy import for openai==0.28
+import openai   # legacy import for openai==0.28
+from dotenv import load_dotenv   # ✅ NEW
+
+# =====================================================
+# LOAD .env LOCALLY
+# =====================================================
+load_dotenv()  # this will read your .env file
 
 app = Flask(__name__)
 
