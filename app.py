@@ -4,9 +4,8 @@ import psycopg2.extras
 import datetime
 import os
 import re
-from dotenv import load_dotenv
-from openai import OpenAI
 import random
+from dotenv import load_dotenv
 
 # =====================================================
 # LOAD ENV
@@ -15,15 +14,9 @@ load_dotenv()
 app = Flask(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 if not DATABASE_URL:
     raise Exception("DATABASE_URL not set")
-
-if not OPENAI_API_KEY:
-    raise Exception("OPENAI_API_KEY not set")
-
-client = OpenAI(api_key=OPENAI_API_KEY)
 
 # =====================================================
 # DATABASE
@@ -32,7 +25,7 @@ def get_db():
     return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
-# GLOBAL 404 HANDLER (Prevents ugly HTML page)
+# GLOBAL ERROR HANDLER
 # =====================================================
 @app.errorhandler(404)
 def not_found(e):
@@ -115,25 +108,27 @@ def login():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# RISK DETECTION
+# RISK DETECTION (MULTILINGUAL)
 # =====================================================
 def detect_risk(text):
     text = text.lower()
 
-    critical_phrases = [
+    critical = [
         "i want to die", "kill myself", "suicide", "hurt myself",
-        "मुझे मरना है", "आत्महत्या", "मला मरायचं आहे"
+        "मुझे मरना है", "आत्महत्या", "मला मरायचं आहे",
+        "quiero morir", "suicidio"
     ]
 
-    if any(p in text for p in critical_phrases):
+    if any(p in text for p in critical):
         return "critical"
 
-    negative_words = [
+    negative = [
         "sad", "depressed", "alone", "hopeless",
-        "उदास", "निराश", "एकटा"
+        "उदास", "निराश", "एकटा",
+        "triste", "solo"
     ]
 
-    score = sum(1 for w in negative_words if w in text)
+    score = sum(1 for w in negative if w in text)
 
     if score >= 2:
         return "high"
@@ -162,43 +157,45 @@ def get_user_history(user_id):
     return [r["message"] for r in rows]
 
 # =====================================================
-# AI GENERATION
+# SMART AI SIMULATION
 # =====================================================
-def generate_ai(message):
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a compassionate mental health assistant."},
-            {"role": "user", "content": message}
-        ]
-    )
-    return response.choices[0].message.content
+def generate_ai_response(message, risk):
+    empathetic_responses = {
+        "low": "I'm glad you're sharing your thoughts. Tell me more about how you're feeling.",
+        "medium": "I understand this might feel heavy. You're not alone in this.",
+        "high": "That sounds really difficult. I'm here with you. Let's take this one step at a time.",
+        "critical": "I'm really concerned about you. Please consider reaching out to someone immediately. You deserve help."
+    }
+    return empathetic_responses.get(risk)
 
-def generate_quote(history, message):
-    context = "\n".join(history)
+def generate_personalized_quote(history):
+    if not history:
+        return "Every new day is a fresh beginning."
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Generate one short motivational quote."},
-            {"role": "user", "content": f"{context}\n{message}"}
-        ]
-    )
-    return response.choices[0].message.content.strip()
+    keywords = " ".join(history).lower()
 
-def generate_recommendations(history, message, risk):
-    context = "\n".join(history)
+    if "alone" in keywords:
+        return "Even when you feel alone, you are deeply valued."
+    if "hopeless" in keywords:
+        return "Hope can return in the smallest moments."
+    if "sad" in keywords:
+        return "Your sadness does not define your strength."
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "Give 3 short practical self-care recommendations."},
-            {"role": "user", "content": f"{context}\n{message}\nRisk: {risk}"}
-        ]
-    )
+    return random.choice([
+        "You are stronger than you think.",
+        "Progress, not perfection.",
+        "Your feelings are valid."
+    ])
 
-    text = response.choices[0].message.content.strip()
-    return [line.strip("-•1234567890. ") for line in text.split("\n") if line.strip()][:3]
+def generate_recommendations(risk):
+    if risk == "low":
+        return ["Keep a gratitude journal.", "Go for a short walk.", "Listen to calming music."]
+    elif risk == "medium":
+        return ["Practice deep breathing.", "Talk to a trusted friend.", "Try a short meditation."]
+    elif risk == "high":
+        return ["Reach out to someone immediately.", "Avoid isolation.", "Consider speaking to a counselor."]
+    else:
+        return ["Call emergency services.", "Contact a suicide helpline.", "Stay with someone you trust."]
 
 # =====================================================
 # CHAT
@@ -213,9 +210,9 @@ def chat():
         risk = detect_risk(message)
         history = get_user_history(user_id)
 
-        ai_response = generate_ai(message)
-        quote = generate_quote(history, message)
-        recommendations = generate_recommendations(history, message, risk)
+        ai_response = generate_ai_response(message, risk)
+        quote = generate_personalized_quote(history)
+        recommendations = generate_recommendations(risk)
 
         conn = get_db()
         cur = conn.cursor()
@@ -277,7 +274,7 @@ def analytics(user_id):
     affirmations = [
         "You are stronger than you think.",
         "Your feelings are valid.",
-        "Progress, not perfection."
+        "Keep going — you are doing your best."
     ]
 
     return jsonify({
