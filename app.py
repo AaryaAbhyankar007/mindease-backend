@@ -12,7 +12,6 @@ import random
 # LOAD ENV
 # =====================================================
 load_dotenv()
-
 app = Flask(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -33,18 +32,87 @@ def get_db():
     return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
-# HEALTH CHECK
+# GLOBAL 404 HANDLER (Prevents ugly HTML page)
+# =====================================================
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Endpoint not found"}), 404
+
+# =====================================================
+# HEALTH
 # =====================================================
 @app.route("/health", methods=["GET"])
 def health():
-    return "OK", 200
+    return jsonify({"status": "OK"})
 
 # =====================================================
 # HOME
 # =====================================================
 @app.route("/", methods=["GET"])
 def home():
-    return "MindEase Backend Running 🚀"
+    return jsonify({"message": "MindEase Backend Running 🚀"})
+
+# =====================================================
+# REGISTER
+# =====================================================
+@app.route("/register", methods=["POST"])
+def register():
+    try:
+        data = request.get_json()
+        name = data["name"]
+        email = data["email"]
+        password = data["password"]
+
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO users (name, email, password, streak, last_active)
+            VALUES (%s, %s, %s, 0, NULL)
+        """, (name, email, password))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"message": "User registered successfully"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# LOGIN
+# =====================================================
+@app.route("/login", methods=["POST"])
+def login():
+    try:
+        data = request.get_json()
+        email = data["email"]
+        password = data["password"]
+
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        cur.execute("""
+            SELECT * FROM users
+            WHERE email=%s AND password=%s
+        """, (email, password))
+
+        user = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if user:
+            return jsonify({
+                "message": "Login successful",
+                "user_id": user["id"],
+                "name": user["name"]
+            })
+
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # =====================================================
 # RISK DETECTION
@@ -54,19 +122,15 @@ def detect_risk(text):
 
     critical_phrases = [
         "i want to die", "kill myself", "suicide", "hurt myself",
-        "मुझे मरना है", "आत्महत्या", "खुद को नुकसान पहुँचाना",
-        "मला मरायचं आहे", "आत्महत्या करणार", "स्वतःला इजा करणार",
-        "quiero morir", "suicidio", "matarme", "hacerme daño"
+        "मुझे मरना है", "आत्महत्या", "मला मरायचं आहे"
     ]
 
     if any(p in text for p in critical_phrases):
         return "critical"
 
     negative_words = [
-        "sad", "depressed", "alone", "hopeless", "worthless",
-        "उदास", "निराश", "अकेला", "बेकार",
-        "एकटा", "निरर्थक",
-        "triste", "deprimido", "solo", "sin esperanza", "inútil"
+        "sad", "depressed", "alone", "hopeless",
+        "उदास", "निराश", "एकटा"
     ]
 
     score = sum(1 for w in negative_words if w in text)
@@ -78,15 +142,14 @@ def detect_risk(text):
     return "low"
 
 # =====================================================
-# FETCH USER HISTORY CONTEXT
+# USER HISTORY
 # =====================================================
-def get_user_recent_messages(user_id):
+def get_user_history(user_id):
     conn = get_db()
     cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
     cur.execute("""
-        SELECT message
-        FROM chats
+        SELECT message FROM chats
         WHERE user_id=%s
         ORDER BY created_at DESC
         LIMIT 5
@@ -99,106 +162,60 @@ def get_user_recent_messages(user_id):
     return [r["message"] for r in rows]
 
 # =====================================================
-# AI PERSONALIZED QUOTE
+# AI GENERATION
 # =====================================================
-def generate_personalized_quote(user_history, current_message):
-    try:
-        context = "\n".join(user_history)
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You generate short, powerful, emotionally supportive motivational quotes based on user's emotional history."
-                },
-                {
-                    "role": "user",
-                    "content": f"User previous emotions:\n{context}\n\nCurrent message:\n{current_message}\n\nGenerate 1 short personalized motivational quote."
-                }
-            ]
-        )
-
-        return response.choices[0].message.content.strip()
-
-    except:
-        return "You are stronger than this moment."
-
-# =====================================================
-# AI DYNAMIC RECOMMENDATIONS
-# =====================================================
-def generate_dynamic_recommendations(user_history, current_message, risk_level):
-    try:
-        context = "\n".join(user_history)
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a mental health assistant. Give 3 short practical self-care recommendations. Keep them simple and safe."
-                },
-                {
-                    "role": "user",
-                    "content": f"""
-User emotional history:
-{context}
-
-Current message:
-{current_message}
-
-Risk level: {risk_level}
-
-Generate 3 short personalized recommendations.
-"""
-                }
-            ]
-        )
-
-        text = response.choices[0].message.content.strip()
-        recommendations = [r.strip("-•1234567890. ") for r in text.split("\n") if r.strip()]
-
-        return recommendations[:3]
-
-    except:
-        return [
-            "Take a few slow deep breaths.",
-            "Reach out to someone you trust.",
-            "Be gentle with yourself today."
+def generate_ai(message):
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are a compassionate mental health assistant."},
+            {"role": "user", "content": message}
         ]
+    )
+    return response.choices[0].message.content
+
+def generate_quote(history, message):
+    context = "\n".join(history)
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Generate one short motivational quote."},
+            {"role": "user", "content": f"{context}\n{message}"}
+        ]
+    )
+    return response.choices[0].message.content.strip()
+
+def generate_recommendations(history, message, risk):
+    context = "\n".join(history)
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Give 3 short practical self-care recommendations."},
+            {"role": "user", "content": f"{context}\n{message}\nRisk: {risk}"}
+        ]
+    )
+
+    text = response.choices[0].message.content.strip()
+    return [line.strip("-•1234567890. ") for line in text.split("\n") if line.strip()][:3]
 
 # =====================================================
-# AI CHAT RESPONSE
-# =====================================================
-def generate_ai_response(message):
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a deeply empathetic mental health support assistant."},
-                {"role": "user", "content": message}
-            ]
-        )
-        return response.choices[0].message.content
-    except:
-        return "I'm here for you. You’re not alone."
-
-# =====================================================
-# CHAT (FULLY UPGRADED)
+# CHAT
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
         data = request.get_json()
-        user_id = data.get("user_id")
-        message = data.get("message")
+        user_id = data["user_id"]
+        message = data["message"]
 
-        risk_level = detect_risk(message)
-        user_history = get_user_recent_messages(user_id)
+        risk = detect_risk(message)
+        history = get_user_history(user_id)
 
-        ai_response = generate_ai_response(message)
-        personalized_quote = generate_personalized_quote(user_history, message)
-        dynamic_recommendations = generate_dynamic_recommendations(user_history, message, risk_level)
+        ai_response = generate_ai(message)
+        quote = generate_quote(history, message)
+        recommendations = generate_recommendations(history, message, risk)
 
         conn = get_db()
         cur = conn.cursor()
@@ -206,7 +223,7 @@ def chat():
         cur.execute("""
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
             VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, message, ai_response, risk_level, datetime.datetime.utcnow()))
+        """, (user_id, message, ai_response, risk, datetime.datetime.utcnow()))
 
         conn.commit()
         cur.close()
@@ -214,69 +231,60 @@ def chat():
 
         return jsonify({
             "response": ai_response,
-            "risk_level": risk_level,
-            "personalized_quote": personalized_quote,
-            "recommendations": dynamic_recommendations
+            "risk_level": risk,
+            "personalized_quote": quote,
+            "recommendations": recommendations
         })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# ANALYTICS WITH AFFIRMATIONS, QUOTES & RECOMMENDATIONS
+# CHAT HISTORY
+# =====================================================
+@app.route("/chat-history/<int:user_id>", methods=["GET"])
+def chat_history(user_id):
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+    cur.execute("""
+        SELECT message, response, risk_level, created_at
+        FROM chats
+        WHERE user_id=%s
+        ORDER BY created_at DESC
+    """, (user_id,))
+
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    return jsonify({"history": rows})
+
+# =====================================================
+# ANALYTICS
 # =====================================================
 @app.route("/analytics/<int:user_id>", methods=["GET"])
 def analytics(user_id):
-    try:
-        conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        cur.execute("""
-            SELECT risk_level FROM chats
-            WHERE user_id=%s
-        """, (user_id,))
+    cur.execute("SELECT risk_level FROM chats WHERE user_id=%s", (user_id,))
+    rows = cur.fetchall()
 
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
+    total = len(rows)
+    high_count = sum(1 for r in rows if r["risk_level"] in ["high", "critical"])
 
-        total_chats = len(rows)
-        high_risk_count = sum(1 for r in rows if r["risk_level"] in ["high", "critical"])
+    affirmations = [
+        "You are stronger than you think.",
+        "Your feelings are valid.",
+        "Progress, not perfection."
+    ]
 
-        affirmations = [
-            "You are stronger than you think.",
-            "Every day is a new beginning.",
-            "Your feelings are valid, and you matter.",
-            "Keep going — you’re doing better than you realize.",
-            "Hope is always within reach.",
-            "You are not alone on this journey."
-        ]
-
-        quotes = [
-            "The best way out is always through. – Robert Frost",
-            "Believe you can and you're halfway there. – Theodore Roosevelt",
-            "Keep your face always toward the sunshine—and shadows will fall behind you. – Walt Whitman"
-        ]
-
-        recommendations = [
-            "Try a short mindfulness exercise today.",
-            "Take a walk outside and notice your surroundings.",
-            "Write down three things you’re grateful for.",
-            "Listen to calming music for 10 minutes."
-        ]
-
-        suggestion = random.choice(affirmations)
-
-        return jsonify({
-            "total_chats": total_chats,
-            "high_risk_count": high_risk_count,
-            "suggestion": suggestion,
-            "quotes": random.sample(quotes, 2),
-            "recommendations": random.sample(recommendations, 2)
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({
+        "total_chats": total,
+        "high_risk_count": high_count,
+        "affirmation": random.choice(affirmations)
+    })
 
 # =====================================================
 # RUN
