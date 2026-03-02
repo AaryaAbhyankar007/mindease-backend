@@ -143,6 +143,10 @@ def generate_affirmation(risk, recent_moods):
     else:
         return "You are growing stronger every day."
 
+def get_psychologist_link():
+    # Universal Google Maps search link
+    return "https://www.google.com/maps/search/psychologist+near+me/"
+
 # =====================================================
 # CHAT
 # =====================================================
@@ -156,6 +160,11 @@ def chat():
         risk = detect_risk(message)
         recent_moods = get_recent_mood(user_id)
         response_text = generate_affirmation(risk, recent_moods)
+
+        # Add psychologist link for critical cases
+        psychologist_link = None
+        if risk == "critical":
+            psychologist_link = get_psychologist_link()
 
         conn = get_db()
         cur = conn.cursor()
@@ -171,7 +180,8 @@ def chat():
 
         return jsonify({
             "response": response_text,
-            "risk_level": risk
+            "risk_level": risk,
+            "psychologist_link": psychologist_link
         })
 
     except Exception as e:
