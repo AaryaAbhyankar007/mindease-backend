@@ -4,7 +4,6 @@ import psycopg2.extras
 import datetime
 import os
 from dotenv import load_dotenv
-from deep_translator import GoogleTranslator
 
 # =====================================================
 # LOAD ENV
@@ -23,15 +22,11 @@ def get_db():
     return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
-# HOME & HEALTH
+# HOME
 # =====================================================
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "MindEase Backend Running 🚀"})
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "OK"})
 
 # =====================================================
 # REGISTER
@@ -114,38 +109,21 @@ def detect_risk(text):
     return "low"
 
 # =====================================================
-# AFFIRMATION LOGIC
+# FRIENDLY RESPONSE SYSTEM
 # =====================================================
-def get_recent_mood(user_id, limit=5):
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+def generate_response(risk):
 
-    cur.execute("""
-        SELECT risk_level FROM chats
-        WHERE user_id=%s
-        ORDER BY created_at DESC
-        LIMIT %s
-    """, (user_id, limit))
+    if risk == "critical":
+        return "I'm really sorry you're feeling this way. I'm here with you. Would you like to talk more about what's going on?"
 
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+    elif risk == "high":
+        return "That sounds really difficult. You don't have to face this alone. I'm listening."
 
-    return [r["risk_level"] for r in rows]
+    elif risk == "medium":
+        return "I understand. Want to share a bit more about how you're feeling?"
 
-def generate_affirmation(risk, recent_moods):
-    if risk in ["critical", "high"]:
-        return "You're not alone. Help is always available, and you have the strength to reach out."
-    elif recent_moods.count("low") >= 3:
-        return "You're doing great. Keep up the positive momentum!"
-    elif recent_moods.count("medium") >= 3:
-        return "You're making progress. Every step forward matters."
     else:
-        return "You are growing stronger every day."
-
-def get_psychologist_link():
-    # Universal Google Maps search link
-    return "https://www.google.com/maps/search/psychologist+near+me/"
+        return "That's great to hear! Keep going 😊"
 
 # =====================================================
 # CHAT
@@ -158,13 +136,10 @@ def chat():
         message = data["message"]
 
         risk = detect_risk(message)
-        recent_moods = get_recent_mood(user_id)
-        response_text = generate_affirmation(risk, recent_moods)
+        response_text = generate_response(risk)
 
-        # Add psychologist link for critical cases
-        psychologist_link = None
-        if risk == "critical":
-            psychologist_link = get_psychologist_link()
+        # Only show help option (DO NOT send link automatically)
+        show_help_option = True if risk == "critical" else False
 
         conn = get_db()
         cur = conn.cursor()
@@ -181,7 +156,7 @@ def chat():
         return jsonify({
             "response": response_text,
             "risk_level": risk,
-            "psychologist_link": psychologist_link
+            "show_help_option": show_help_option
         })
 
     except Exception as e:
@@ -192,21 +167,25 @@ def chat():
 # =====================================================
 @app.route("/chat-history/<int:user_id>", methods=["GET"])
 def chat_history(user_id):
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-    cur.execute("""
-        SELECT message, response, risk_level, created_at
-        FROM chats
-        WHERE user_id=%s
-        ORDER BY created_at DESC
-    """, (user_id,))
+        cur.execute("""
+            SELECT message, response, risk_level, created_at
+            FROM chats
+            WHERE user_id=%s
+            ORDER BY created_at DESC
+        """, (user_id,))
 
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
 
-    return jsonify({"history": rows})
+        return jsonify({"history": rows})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # =====================================================
 # ANALYTICS
