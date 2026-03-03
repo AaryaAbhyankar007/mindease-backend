@@ -116,39 +116,20 @@ def detect_risk(text):
     return "low"
 
 # =====================================================
-# SMART FRIENDLY RESPONSE SYSTEM
+# RESPONSE GENERATOR
 # =====================================================
-def generate_response(risk, message):
-
-    message = message.lower()
+def generate_response(risk):
 
     if risk == "critical":
-        return (
-            "I'm really sorry you're feeling this way. 💙 "
-            "You are not alone. I'm here with you. "
-            "Would you like to talk about what's making you feel this way?"
-        )
+        return "I'm really sorry you're feeling this way 💙 You're not alone. Would you like to talk about it?"
 
     if risk == "high":
-        return (
-            "That sounds really heavy. Thank you for sharing it with me. "
-            "What’s been bothering you lately?"
-        )
+        return "That sounds heavy. I'm here to listen. Tell me more."
 
     if risk == "medium":
-        return (
-            "I understand. Feel free to tell me more. "
-            "I'm listening carefully."
-        )
+        return "I understand. Share more with me."
 
-    # Positive messages
-    if "happy" in message or "good" in message:
-        return "That’s amazing! I’m really happy for you 😊"
-
-    if "thank" in message:
-        return "You’re welcome! I’m always here for you."
-
-    return "Tell me more. I’m here to listen."
+    return "I'm listening. Tell me more 😊"
 
 # =====================================================
 # CHAT
@@ -161,7 +142,7 @@ def chat():
         message = data["message"]
 
         risk = detect_risk(message)
-        response_text = generate_response(risk, message)
+        response_text = generate_response(risk)
 
         conn = get_db()
         cur = conn.cursor()
@@ -185,26 +166,30 @@ def chat():
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# CHAT HISTORY
+# SAVE GAME SCORE
 # =====================================================
-@app.route("/chat-history/<int:user_id>", methods=["GET"])
-def chat_history(user_id):
+@app.route("/game-score", methods=["POST"])
+def save_game_score():
     try:
+        data = request.get_json()
+
+        user_id = data["user_id"]
+        game_name = data["game_name"]
+        score = data["score"]
+
         conn = get_db()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur = conn.cursor()
 
         cur.execute("""
-            SELECT message, response, risk_level, created_at
-            FROM chats
-            WHERE user_id=%s
-            ORDER BY created_at DESC
-        """, (user_id,))
+            INSERT INTO game_scores (user_id, game_name, score, created_at)
+            VALUES (%s, %s, %s, %s)
+        """, (user_id, game_name, score, datetime.datetime.utcnow()))
 
-        rows = cur.fetchall()
+        conn.commit()
         cur.close()
         conn.close()
 
-        return jsonify({"history": rows})
+        return jsonify({"message": "Game score saved"})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -236,7 +221,7 @@ def analytics(user_id):
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# MOOD GRAPH
+# MOOD GRAPH (CHAT + GAME COMBINED)
 # =====================================================
 @app.route("/mood-graph/<int:user_id>", methods=["GET"])
 def mood_graph(user_id):
@@ -244,30 +229,46 @@ def mood_graph(user_id):
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
+        # Chat mood
         cur.execute("""
             SELECT risk_level
             FROM chats
             WHERE user_id=%s
             ORDER BY created_at ASC
         """, (user_id,))
+        chat_rows = cur.fetchall()
 
-        rows = cur.fetchall()
+        # Game scores
+        cur.execute("""
+            SELECT score
+            FROM game_scores
+            WHERE user_id=%s
+            ORDER BY created_at ASC
+        """, (user_id,))
+        game_rows = cur.fetchall()
+
         cur.close()
         conn.close()
 
         graph = []
 
-        for r in rows:
-            if r["risk_level"] == "low":
-                score = 5
-            elif r["risk_level"] == "medium":
-                score = 3
-            elif r["risk_level"] == "high":
-                score = 2
-            else:
-                score = 1
+        score_map = {
+            "low": 5,
+            "medium": 3,
+            "high": 2,
+            "critical": 1
+        }
 
-            graph.append({"mood_score": score})
+        for r in chat_rows:
+            graph.append({"mood_score": score_map.get(r["risk_level"], 5)})
+
+        for g in game_rows:
+            if g["score"] >= 80:
+                graph.append({"mood_score": 5})
+            elif g["score"] >= 50:
+                graph.append({"mood_score": 3})
+            else:
+                graph.append({"mood_score": 1})
 
         return jsonify({"graph": graph})
 
