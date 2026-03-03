@@ -116,21 +116,39 @@ def detect_risk(text):
     return "low"
 
 # =====================================================
-# FRIENDLY RESPONSE
+# SMART FRIENDLY RESPONSE SYSTEM
 # =====================================================
-def generate_response(risk):
+def generate_response(risk, message):
+
+    message = message.lower()
 
     if risk == "critical":
-        return "I'm really sorry you're feeling this way. I'm here with you. You can talk to me."
+        return (
+            "I'm really sorry you're feeling this way. 💙 "
+            "You are not alone. I'm here with you. "
+            "Would you like to talk about what's making you feel this way?"
+        )
 
-    elif risk == "high":
-        return "That sounds really difficult. I'm listening."
+    if risk == "high":
+        return (
+            "That sounds really heavy. Thank you for sharing it with me. "
+            "What’s been bothering you lately?"
+        )
 
-    elif risk == "medium":
-        return "I understand. Tell me more if you want."
+    if risk == "medium":
+        return (
+            "I understand. Feel free to tell me more. "
+            "I'm listening carefully."
+        )
 
-    else:
-        return "That's wonderful to hear 😊 Keep going!"
+    # Positive messages
+    if "happy" in message or "good" in message:
+        return "That’s amazing! I’m really happy for you 😊"
+
+    if "thank" in message:
+        return "You’re welcome! I’m always here for you."
+
+    return "Tell me more. I’m here to listen."
 
 # =====================================================
 # CHAT
@@ -143,7 +161,7 @@ def chat():
         message = data["message"]
 
         risk = detect_risk(message)
-        response_text = generate_response(risk)
+        response_text = generate_response(risk, message)
 
         conn = get_db()
         cur = conn.cursor()
@@ -218,7 +236,7 @@ def analytics(user_id):
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# MOOD GRAPH (IMPORTANT FOR DASHBOARD)
+# MOOD GRAPH
 # =====================================================
 @app.route("/mood-graph/<int:user_id>", methods=["GET"])
 def mood_graph(user_id):
