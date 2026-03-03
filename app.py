@@ -132,7 +132,7 @@ def generate_response(risk):
     return "I'm listening. Tell me more 😊"
 
 # =====================================================
-# CHAT
+# CHAT (UPDATED FOR ANDROID)
 # =====================================================
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -156,10 +156,10 @@ def chat():
         cur.close()
         conn.close()
 
+        # 🔥 IMPORTANT: Match Android Keys
         return jsonify({
-            "response": response_text,
-            "risk_level": risk,
-            "show_help_option": risk == "critical"
+            "reply": response_text,
+            "risk": risk
         })
 
     except Exception as e:
@@ -221,7 +221,7 @@ def analytics(user_id):
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# MOOD GRAPH (CHAT + GAME COMBINED)
+# MOOD GRAPH
 # =====================================================
 @app.route("/mood-graph/<int:user_id>", methods=["GET"])
 def mood_graph(user_id):
@@ -229,7 +229,6 @@ def mood_graph(user_id):
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
-        # Chat mood
         cur.execute("""
             SELECT risk_level
             FROM chats
@@ -238,7 +237,6 @@ def mood_graph(user_id):
         """, (user_id,))
         chat_rows = cur.fetchall()
 
-        # Game scores
         cur.execute("""
             SELECT score
             FROM game_scores
