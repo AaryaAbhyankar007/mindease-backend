@@ -116,18 +116,18 @@ def detect_risk(text):
     return "low"
 
 # =====================================================
-# FRIENDLY RESPONSE SYSTEM
+# FRIENDLY RESPONSE
 # =====================================================
 def generate_response(risk):
 
     if risk == "critical":
-        return "I'm really sorry you're feeling this way. I'm here with you. Would you like to talk more?"
+        return "I'm really sorry you're feeling this way. I'm here with you. You can talk to me."
 
     elif risk == "high":
-        return "That sounds really difficult. I'm listening and I care about how you feel."
+        return "That sounds really difficult. I'm listening."
 
     elif risk == "medium":
-        return "I understand. Do you want to share a little more about what's happening?"
+        return "I understand. Tell me more if you want."
 
     else:
         return "That's wonderful to hear 😊 Keep going!"
@@ -145,9 +145,6 @@ def chat():
         risk = detect_risk(message)
         response_text = generate_response(risk)
 
-        # Show help button only for critical
-        show_help_option = True if risk == "critical" else False
-
         conn = get_db()
         cur = conn.cursor()
 
@@ -163,7 +160,7 @@ def chat():
         return jsonify({
             "response": response_text,
             "risk_level": risk,
-            "show_help_option": show_help_option
+            "show_help_option": risk == "critical"
         })
 
     except Exception as e:
@@ -216,6 +213,45 @@ def analytics(user_id):
             "total_chats": total,
             "high_risk_count": high_risk
         })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# MOOD GRAPH (IMPORTANT FOR DASHBOARD)
+# =====================================================
+@app.route("/mood-graph/<int:user_id>", methods=["GET"])
+def mood_graph(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
+        cur.execute("""
+            SELECT risk_level
+            FROM chats
+            WHERE user_id=%s
+            ORDER BY created_at ASC
+        """, (user_id,))
+
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        graph = []
+
+        for r in rows:
+            if r["risk_level"] == "low":
+                score = 5
+            elif r["risk_level"] == "medium":
+                score = 3
+            elif r["risk_level"] == "high":
+                score = 2
+            else:
+                score = 1
+
+            graph.append({"mood_score": score})
+
+        return jsonify({"graph": graph})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
