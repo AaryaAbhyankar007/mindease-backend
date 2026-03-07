@@ -3,27 +3,32 @@ import psycopg2
 import psycopg2.extras
 import datetime
 import os
+import re
 from dotenv import load_dotenv
 
 # =====================================================
 # LOAD ENV
 # =====================================================
+
 load_dotenv()
 app = Flask(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
 if not DATABASE_URL:
     raise Exception("DATABASE_URL not set")
 
 # =====================================================
 # DATABASE CONNECTION
 # =====================================================
+
 def get_db():
     return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
 # HOME
 # =====================================================
+
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "MindEase Backend Running 🚀"})
@@ -31,6 +36,7 @@ def home():
 # =====================================================
 # HEALTH CHECK
 # =====================================================
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "OK"})
@@ -38,10 +44,12 @@ def health():
 # =====================================================
 # REGISTER
 # =====================================================
+
 @app.route("/register", methods=["POST"])
 def register():
     try:
         data = request.get_json()
+
         name = data["name"]
         email = data["email"]
         password = data["password"]
@@ -50,6 +58,7 @@ def register():
         cur = conn.cursor()
 
         cur.execute("SELECT id FROM users WHERE email=%s", (email,))
+
         if cur.fetchone():
             return jsonify({"error": "Email already exists"}), 400
 
@@ -70,10 +79,13 @@ def register():
 # =====================================================
 # LOGIN
 # =====================================================
+
 @app.route("/login", methods=["POST"])
 def login():
     try:
+
         data = request.get_json()
+
         email = data["email"]
         password = data["password"]
 
@@ -86,6 +98,7 @@ def login():
         """, (email, password))
 
         user = cur.fetchone()
+
         cur.close()
         conn.close()
 
@@ -101,48 +114,155 @@ def login():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# =====================================================
+# NONSENSE DETECTION
+# =====================================================
+
+def is_nonsense(text):
+
+    if len(text) < 2:
+        return True
+
+    if re.fullmatch(r"[a-zA-Z]{6,}", text) and len(set(text)) <= 2:
+        return True
+
+    return False
+
+
+# =====================================================
+# EMOTION DETECTION
+# =====================================================
+
+def detect_emotion(text):
+
+    text = text.lower()
+
+    happy = ["happy","great","good","excited","awesome"]
+    sad = ["sad","lonely","cry","hurt","down"]
+    breakup = ["breakup","heartbroken","she left me","he left me"]
+    anger = ["angry","mad","furious","hate"]
+    stress = ["stress","pressure","anxiety","overthinking","tired"]
+
+    if any(w in text for w in happy):
+        return "happy"
+
+    if any(w in text for w in breakup):
+        return "breakup"
+
+    if any(w in text for w in sad):
+        return "sad"
+
+    if any(w in text for w in anger):
+        return "angry"
+
+    if any(w in text for w in stress):
+        return "stress"
+
+    return "normal"
+
+
 # =====================================================
 # RISK DETECTION
 # =====================================================
+
 def detect_risk(text):
+
     text = text.lower()
 
-    if any(x in text for x in ["i want to die", "kill myself", "suicide"]):
+    suicide_patterns = [
+        "i want to die",
+        "kill myself",
+        "suicide",
+        "end my life"
+    ]
+
+    violence_patterns = [
+        "kill someone",
+        "hurt someone",
+        "attack someone"
+    ]
+
+    if any(x in text for x in suicide_patterns):
         return "critical"
-    if any(x in text for x in ["hopeless", "worthless"]):
+
+    if any(x in text for x in violence_patterns):
         return "high"
-    if any(x in text for x in ["sad", "alone", "depressed"]):
+
+    if any(x in text for x in ["hopeless","worthless"]):
+        return "high"
+
+    if any(x in text for x in ["sad","alone","depressed"]):
         return "medium"
+
     return "low"
 
+
 # =====================================================
-# RESPONSE GENERATOR
+# RESPONSE GENERATOR (SMART)
 # =====================================================
-def generate_response(risk):
+
+def generate_response(message):
+
+    if is_nonsense(message):
+        return "I didn't quite understand that. Could you tell me a bit more?"
+
+    emotion = detect_emotion(message)
+    risk = detect_risk(message)
+
+    # ----- CRITICAL -----
 
     if risk == "critical":
-        return "I'm really sorry you're feeling this way 💙 You're not alone. Would you like to talk about it?"
+        return (
+            "I'm really sorry you're feeling this way 💙 "
+            "You are not alone. It might help to talk to someone you trust "
+            "or a professional helpline."
+        )
+
+    # ----- HIGH DISTRESS -----
 
     if risk == "high":
-        return "That sounds heavy. I'm here to listen. Tell me more."
+        return "That sounds really difficult. I'm here to listen. What happened?"
 
-    if risk == "medium":
-        return "I understand. Share more with me."
+    # ----- EMOTIONS -----
+
+    if emotion == "happy":
+        return "That's great to hear! 😊 What made your day good?"
+
+    if emotion == "breakup":
+        return (
+            "Breakups can be really painful. "
+            "It's okay to feel hurt. Do you want to talk about what happened?"
+        )
+
+    if emotion == "sad":
+        return "I'm sorry you're feeling sad. I'm here to listen."
+
+    if emotion == "angry":
+        return "It sounds like you're feeling angry. What happened?"
+
+    if emotion == "stress":
+        return "Stress can feel overwhelming. What's been causing the pressure?"
 
     return "I'm listening. Tell me more 😊"
 
+
 # =====================================================
-# CHAT (UPDATED FOR ANDROID)
+# CHAT (ANDROID COMPATIBLE)
 # =====================================================
+
 @app.route("/chat", methods=["POST"])
 def chat():
+
     try:
+
         data = request.get_json()
+
         user_id = data["user_id"]
         message = data["message"]
 
         risk = detect_risk(message)
-        response_text = generate_response(risk)
+        response_text = generate_response(message)
 
         conn = get_db()
         cur = conn.cursor()
@@ -156,7 +276,6 @@ def chat():
         cur.close()
         conn.close()
 
-        # 🔥 IMPORTANT: Match Android Keys
         return jsonify({
             "reply": response_text,
             "risk": risk
@@ -165,12 +284,16 @@ def chat():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 # =====================================================
 # SAVE GAME SCORE
 # =====================================================
+
 @app.route("/game-score", methods=["POST"])
 def save_game_score():
+
     try:
+
         data = request.get_json()
 
         user_id = data["user_id"]
@@ -194,12 +317,16 @@ def save_game_score():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 # =====================================================
 # ANALYTICS
 # =====================================================
+
 @app.route("/analytics/<int:user_id>", methods=["GET"])
 def analytics(user_id):
+
     try:
+
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
@@ -207,7 +334,7 @@ def analytics(user_id):
         rows = cur.fetchall()
 
         total = len(rows)
-        high_risk = sum(1 for r in rows if r["risk_level"] in ["high", "critical"])
+        high_risk = sum(1 for r in rows if r["risk_level"] in ["high","critical"])
 
         cur.close()
         conn.close()
@@ -220,12 +347,16 @@ def analytics(user_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 # =====================================================
 # MOOD GRAPH
 # =====================================================
+
 @app.route("/mood-graph/<int:user_id>", methods=["GET"])
 def mood_graph(user_id):
+
     try:
+
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
@@ -235,47 +366,38 @@ def mood_graph(user_id):
             WHERE user_id=%s
             ORDER BY created_at ASC
         """, (user_id,))
-        chat_rows = cur.fetchall()
 
-        cur.execute("""
-            SELECT score
-            FROM game_scores
-            WHERE user_id=%s
-            ORDER BY created_at ASC
-        """, (user_id,))
-        game_rows = cur.fetchall()
+        rows = cur.fetchall()
 
-        cur.close()
-        conn.close()
+        score_map = {
+            "low":5,
+            "medium":3,
+            "high":2,
+            "critical":1
+        }
 
         graph = []
 
-        score_map = {
-            "low": 5,
-            "medium": 3,
-            "high": 2,
-            "critical": 1
-        }
+        for r in rows:
+            graph.append({
+                "mood_score": score_map.get(r["risk_level"],5)
+            })
 
-        for r in chat_rows:
-            graph.append({"mood_score": score_map.get(r["risk_level"], 5)})
-
-        for g in game_rows:
-            if g["score"] >= 80:
-                graph.append({"mood_score": 5})
-            elif g["score"] >= 50:
-                graph.append({"mood_score": 3})
-            else:
-                graph.append({"mood_score": 1})
+        cur.close()
+        conn.close()
 
         return jsonify({"graph": graph})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 # =====================================================
-# RUN
+# RUN SERVER
 # =====================================================
+
 if __name__ == "__main__":
+
     port = int(os.environ.get("PORT", 5000))
+
     app.run(host="0.0.0.0", port=port)
