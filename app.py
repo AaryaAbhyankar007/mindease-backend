@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify
-from textblob import TextBlob
 import psycopg2
 import psycopg2.extras
 import datetime
@@ -7,6 +6,9 @@ import os
 import re
 from dotenv import load_dotenv
 from textblob import TextBlob
+import nltk
+
+nltk.download('punkt')
 
 # =====================================================
 # LOAD ENV
