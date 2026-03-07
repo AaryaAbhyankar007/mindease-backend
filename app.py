@@ -6,9 +6,6 @@ import os
 import re
 from dotenv import load_dotenv
 from textblob import TextBlob
-import nltk
-
-nltk.download('punkt')
 
 # =====================================================
 # LOAD ENV
@@ -18,14 +15,11 @@ app = Flask(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 GOOGLE_MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 if not DATABASE_URL:
     raise Exception("DATABASE_URL not set")
 if not GOOGLE_MAPS_KEY:
     raise Exception("GOOGLE_MAPS_KEY not set")
-if not OPENAI_API_KEY:
-    raise Exception("OPENAI_API_KEY not set")
 
 # =====================================================
 # DATABASE CONNECTION
@@ -60,6 +54,7 @@ def register():
 
         conn = get_db()
         cur = conn.cursor()
+
         cur.execute("SELECT id FROM users WHERE email=%s", (email,))
         if cur.fetchone():
             return jsonify({"error": "Email already exists"}), 400
@@ -90,6 +85,7 @@ def login():
 
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+
         cur.execute("""
             SELECT id, name FROM users
             WHERE email=%s AND password=%s
@@ -105,6 +101,7 @@ def login():
                 "user_id": user["id"],
                 "name": user["name"]
             })
+
         return jsonify({"error": "Invalid credentials"}), 401
 
     except Exception as e:
@@ -114,15 +111,9 @@ def login():
 # NONSENSE DETECTION
 # =====================================================
 def is_nonsense(text):
-    text = text.strip()
-    # Very short or repetitive strings
     if len(text) < 2:
         return True
     if re.fullmatch(r"[a-zA-Z]{6,}", text) and len(set(text)) <= 2:
-        return True
-    # Detect low meaningful words using NLP
-    blob = TextBlob(text)
-    if blob.sentiment.subjectivity < 0.1 and len(text.split()) <= 3:
         return True
     return False
 
@@ -131,11 +122,11 @@ def is_nonsense(text):
 # =====================================================
 def detect_emotion(text):
     text = text.lower()
-    happy = ["happy","great","good","excited","awesome","joy","fun"]
-    sad = ["sad","lonely","cry","hurt","down","depressed"]
-    breakup = ["breakup","heartbroken","she left me","he left me","dumped"]
-    angry = ["angry","mad","furious","hate"]
-    stress = ["stress","pressure","anxiety","overthinking","tired","stressed"]
+    happy = ["happy","great","good","excited","awesome"]
+    sad = ["sad","lonely","cry","hurt","down"]
+    breakup = ["breakup","heartbroken","she left me","he left me"]
+    anger = ["angry","mad","furious","hate"]
+    stress = ["stress","pressure","anxiety","overthinking","tired"]
 
     if any(w in text for w in happy):
         return "happy"
@@ -143,7 +134,7 @@ def detect_emotion(text):
         return "breakup"
     if any(w in text for w in sad):
         return "sad"
-    if any(w in text for w in angry):
+    if any(w in text for w in anger):
         return "angry"
     if any(w in text for w in stress):
         return "stress"
@@ -168,10 +159,23 @@ def detect_risk(text):
     return "low"
 
 # =====================================================
-# RECOMMENDATIONS BASED ON RISK
+# THERAPIST SUGGESTION (SIMULATED)
 # =====================================================
-def get_recommendations(risk):
-    if risk in ["medium","high","critical"]:
+def get_nearby_therapists(risk_level):
+    # Only return therapists if high or critical
+    if risk_level in ["high", "critical"]:
+        return [
+            {"name": "Dr. John Doe", "location": "City Center", "lat": 40.7128, "lng": -74.0060},
+            {"name": "Dr. Jane Smith", "location": "Downtown Clinic", "lat": 40.7150, "lng": -74.0020}
+        ]
+    return []
+
+# =====================================================
+# RECOMMENDATIONS
+# =====================================================
+def get_recommendations(message, risk, emotion):
+    # Only for low/medium risk negative emotion
+    if risk in ["low","medium"] and emotion in ["sad","stress","breakup","angry"]:
         return [
             "Take deep breaths",
             "Talk to someone you trust",
@@ -181,33 +185,40 @@ def get_recommendations(risk):
     return []
 
 # =====================================================
-# RESPONSE GENERATOR
+# SMART RESPONSE
 # =====================================================
 def generate_response(message):
     if is_nonsense(message):
-        return "Hmm… I didn’t quite get that. Could you clarify a bit so I can help better?"
+        return "I didn't quite understand that. Could you tell me a bit more?", [], detect_risk(message)
 
-    emotion = detect_emotion(message)
     risk = detect_risk(message)
+    emotion = detect_emotion(message)
+    sentiment = TextBlob(message).sentiment.polarity
 
+    # --- CRITICAL RISK ---
     if risk == "critical":
-        return ("I'm really sorry you're feeling this way 💙 "
-                "You are not alone. Consider reaching out to a trusted friend, family member, or professional.")
-    if risk == "high":
-        return "That sounds really difficult. I'm here to listen. What happened?"
+        reply = (
+            "I'm really worried about you 💙 "
+            "Please consider contacting someone you trust or a professional immediately."
+        )
+        recommendations = []
+    # --- HIGH RISK ---
+    elif risk == "high":
+        reply = "It sounds like things are really difficult right now. Can you tell me more about what's going on?"
+        recommendations = get_recommendations(message, risk, emotion)
+    # --- EMOTIONAL RESPONSES ---
+    elif sentiment < -0.3 or emotion in ["sad","stress","breakup","angry"]:
+        reply = "I hear you… feeling this way can be tough. Let's take it one step at a time. Would you like to talk more?"
+        recommendations = get_recommendations(message, risk, emotion)
+    # --- POSITIVE SENTIMENT ---
+    elif sentiment > 0.3 or emotion == "happy":
+        reply = "That's great to hear! 😊 What made your day good?"
+        recommendations = []
+    else:
+        reply = "I'm listening. Tell me more 😊"
+        recommendations = []
 
-    if emotion == "happy":
-        return "That's great to hear! 😊 What made your day good?"
-    if emotion == "breakup":
-        return "Breakups can be painful. It's okay to feel hurt. Want to talk about it?"
-    if emotion == "sad":
-        return "I'm sorry you're feeling sad. I'm here to listen."
-    if emotion == "angry":
-        return "It sounds like you're feeling angry. What happened?"
-    if emotion == "stress":
-        return "Stress can feel overwhelming. What's been causing it?"
-
-    return "I'm listening. Tell me more 😊"
+    return reply, recommendations, risk
 
 # =====================================================
 # CHAT ENDPOINT
@@ -219,40 +230,37 @@ def chat():
         user_id = data["user_id"]
         message = data["message"]
 
-        risk = detect_risk(message)
-        response_text = generate_response(message)
-        recommendations = get_recommendations(risk)
-        therapists = []  # Here frontend can use Google Maps API with GOOGLE_MAPS_KEY to show nearby therapists if risk is high/critical
+        reply, recommendations, risk = generate_response(message)
+        therapists = get_nearby_therapists(risk)
 
         conn = get_db()
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO chats (user_id, message, response, risk_level, created_at)
-            VALUES (%s,%s,%s,%s,%s)
-        """, (user_id, message, response_text, risk, datetime.datetime.utcnow()))
+            VALUES (%s, %s, %s, %s, %s)
+        """, (user_id, message, reply, risk, datetime.datetime.utcnow()))
         conn.commit()
         cur.close()
         conn.close()
 
         return jsonify({
-            "reply": response_text,
+            "reply": reply,
             "risk": risk,
             "recommendations": recommendations,
             "therapists": therapists
         })
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# SAVE GAME SCORE
+# GAME SCORE
 # =====================================================
 @app.route("/game-score", methods=["POST"])
 def save_game_score():
     try:
         data = request.get_json()
         user_id = data["user_id"]
-        game_name = data.get("game_name","")
+        game_name = data["game_name"]
         score = data["score"]
 
         conn = get_db()
@@ -295,7 +303,9 @@ def mood_graph(user_id):
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("SELECT risk_level FROM chats WHERE user_id=%s ORDER BY created_at ASC", (user_id,))
+        cur.execute("""
+            SELECT risk_level FROM chats WHERE user_id=%s ORDER BY created_at ASC
+        """, (user_id,))
         rows = cur.fetchall()
         score_map = {"low":5,"medium":3,"high":2,"critical":1}
         graph = [{"mood_score": score_map.get(r["risk_level"],5)} for r in rows]
@@ -309,5 +319,5 @@ def mood_graph(user_id):
 # RUN SERVER
 # =====================================================
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT",5000))
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
