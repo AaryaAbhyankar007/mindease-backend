@@ -8,17 +8,16 @@ from textblob import TextBlob
 from dotenv import load_dotenv
 
 # =====================================================
-# LOAD ENV
+# LOAD ENV VARIABLES
 # =====================================================
 load_dotenv()
 app = Flask(__name__)
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-GOOGLE_MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY")
-
 if not DATABASE_URL:
     raise Exception("DATABASE_URL not set")
 
+GOOGLE_MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY", "")
 if not GOOGLE_MAPS_KEY:
     raise Exception("GOOGLE_MAPS_KEY not set")
 
@@ -29,21 +28,18 @@ def get_db():
     return psycopg2.connect(DATABASE_URL)
 
 # =====================================================
-# HOME
+# HOME & HEALTH
 # =====================================================
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "MindEase Backend Running 🚀"})
 
-# =====================================================
-# HEALTH CHECK
-# =====================================================
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "OK"})
 
 # =====================================================
-# REGISTER
+# REGISTER & LOGIN
 # =====================================================
 @app.route("/register", methods=["POST"])
 def register():
@@ -59,23 +55,17 @@ def register():
         if cur.fetchone():
             return jsonify({"error": "Email already exists"}), 400
 
-        cur.execute("""
-            INSERT INTO users (name, email, password, created_at)
-            VALUES (%s, %s, %s, %s)
-        """, (name, email, password, datetime.datetime.utcnow()))
-
+        cur.execute(
+            "INSERT INTO users (name, email, password, created_at) VALUES (%s,%s,%s,%s)",
+            (name, email, password, datetime.datetime.utcnow()),
+        )
         conn.commit()
         cur.close()
         conn.close()
-
         return jsonify({"message": "User registered successfully"})
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# =====================================================
-# LOGIN
-# =====================================================
 @app.route("/login", methods=["POST"])
 def login():
     try:
@@ -85,21 +75,18 @@ def login():
 
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cur.execute("""
-            SELECT id, name FROM users
-            WHERE email=%s AND password=%s
-        """, (email, password))
+        cur.execute(
+            "SELECT id, name FROM users WHERE email=%s AND password=%s",
+            (email, password),
+        )
         user = cur.fetchone()
         cur.close()
         conn.close()
 
         if user:
-            return jsonify({
-                "message": "Login successful",
-                "user_id": user["id"],
-                "name": user["name"]
-            })
-
+            return jsonify(
+                {"message": "Login successful", "user_id": user["id"], "name": user["name"]}
+            )
         return jsonify({"error": "Invalid credentials"}), 401
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -108,7 +95,8 @@ def login():
 # NONSENSE DETECTION
 # =====================================================
 def is_nonsense(text):
-    if len(text.strip()) < 2:
+    text = text.strip()
+    if len(text) < 2:
         return True
     if re.fullmatch(r"[a-zA-Z]{6,}", text) and len(set(text)) <= 2:
         return True
@@ -125,11 +113,16 @@ def detect_emotion(text):
     anger = ["angry","mad","furious","hate"]
     stress = ["stress","pressure","anxiety","overthinking","tired"]
 
-    if any(w in text for w in happy): return "happy"
-    if any(w in text for w in breakup): return "breakup"
-    if any(w in text for w in sad): return "sad"
-    if any(w in text for w in anger): return "angry"
-    if any(w in text for w in stress): return "stress"
+    if any(w in text for w in happy):
+        return "happy"
+    if any(w in text for w in breakup):
+        return "breakup"
+    if any(w in text for w in sad):
+        return "sad"
+    if any(w in text for w in anger):
+        return "angry"
+    if any(w in text for w in stress):
+        return "stress"
     return "normal"
 
 # =====================================================
@@ -151,53 +144,55 @@ def detect_risk(text):
     return "low"
 
 # =====================================================
-# RECOMMENDATIONS
+# RESPONSE GENERATOR
 # =====================================================
-def generate_recommendations(risk):
-    if risk in ["medium","high","critical"]:
-        return [
+def generate_response(message):
+    if is_nonsense(message):
+        return "Hmm… I couldn't quite understand that. Could you please clarify what you mean? 😊", "low", []
+
+    emotion = detect_emotion(message)
+    risk = detect_risk(message)
+    recommendations = []
+
+    if risk in ["critical","high","medium"]:
+        recommendations = [
             "Take deep breaths",
             "Talk to someone you trust",
             "Practice mindfulness or meditation",
             "Stay hydrated"
         ]
-    return []
 
-# =====================================================
-# RESPONSE GENERATOR
-# =====================================================
-def generate_response(text):
-    risk = detect_risk(text)
-    emotion = detect_emotion(text)
-
-    # ----- CRITICAL/HIGH -----
     if risk == "critical":
-        return ("I'm really sorry you're feeling this way 💙 "
-                "You are not alone. It might help to talk to someone you trust "
-                "or a professional helpline."), risk
-
+        return (
+            "I'm really sorry you're feeling this way 💙 "
+            "You are not alone. It might help to talk to someone you trust "
+            "or a professional helpline.",
+            risk,
+            recommendations
+        )
     if risk == "high":
-        return "That sounds really difficult. I'm here to listen. What happened?", risk
-
-    # ----- EMOTIONS -----
+        return (
+            "That sounds really difficult. I'm here to listen. What happened?",
+            risk,
+            recommendations
+        )
     if emotion == "happy":
-        return "That's great to hear! 😊 What made your day good?", risk
+        return "That's great to hear! 😊 What made your day good?", risk, []
     if emotion == "breakup":
-        return ("Breakups can be really painful. "
-                "It's okay to feel hurt. Do you want to talk about what happened?"), risk
+        return (
+            "Breakups can be really painful. It's okay to feel hurt. "
+            "Do you want to talk about what happened?",
+            risk,
+            recommendations
+        )
     if emotion == "sad":
-        return "I'm sorry you're feeling sad. I'm here to listen.", risk
+        return "I'm sorry you're feeling sad. I'm here to listen.", risk, recommendations
     if emotion == "angry":
-        return "It sounds like you're feeling angry. What happened?", risk
+        return "It sounds like you're feeling angry. What happened?", risk, recommendations
     if emotion == "stress":
-        return "Stress can feel overwhelming. What's been causing the pressure?", risk
+        return "Stress can feel overwhelming. What's been causing the pressure?", risk, recommendations
 
-    # ----- NONSENSE -----
-    if is_nonsense(text):
-        return "Hmm… I'm having a bit of trouble understanding that. Could you clarify what you mean? 😊", risk
-
-    # ----- DEFAULT -----
-    return "I'm listening. Tell me more 😊", risk
+    return "I'm listening. Tell me more 😊", risk, []
 
 # =====================================================
 # CHAT ENDPOINT
@@ -209,15 +204,15 @@ def chat():
         user_id = data["user_id"]
         message = data["message"]
 
-        response_text, risk = generate_response(message)
-        recommendations = generate_recommendations(risk)
+        response_text, risk, recommendations = generate_response(message)
 
+        # Save chat
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO chats (user_id, message, response, risk_level, created_at)
-            VALUES (%s,%s,%s,%s,%s)
-        """, (user_id, message, response_text, risk, datetime.datetime.utcnow()))
+        cur.execute(
+            "INSERT INTO chats (user_id, message, response, risk_level, created_at) VALUES (%s,%s,%s,%s,%s)",
+            (user_id, message, response_text, risk, datetime.datetime.utcnow())
+        )
         conn.commit()
         cur.close()
         conn.close()
@@ -226,14 +221,13 @@ def chat():
             "reply": response_text,
             "risk": risk,
             "recommendations": recommendations,
-            "therapists": []  # Placeholder for frontend to use Google Maps
+            "therapists": []  # Frontend can use GOOGLE_MAPS_KEY for nearby psychologists
         })
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # =====================================================
-# OTHER EXISTING ENDPOINTS (GAME SCORES, ANALYTICS, MOOD GRAPH)
+# SAVE GAME SCORE
 # =====================================================
 @app.route("/game-score", methods=["POST"])
 def save_game_score():
@@ -245,17 +239,21 @@ def save_game_score():
 
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO game_scores (user_id, game_name, score, created_at)
-            VALUES (%s,%s,%s,%s)
-        """, (user_id, game_name, score, datetime.datetime.utcnow()))
+        cur.execute(
+            "INSERT INTO game_scores (user_id, game_name, score, created_at) VALUES (%s,%s,%s,%s)",
+            (user_id, game_name, score, datetime.datetime.utcnow())
+        )
         conn.commit()
         cur.close()
         conn.close()
+
         return jsonify({"message": "Game score saved"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# =====================================================
+# ANALYTICS
+# =====================================================
 @app.route("/analytics/<int:user_id>", methods=["GET"])
 def analytics(user_id):
     try:
@@ -267,22 +265,68 @@ def analytics(user_id):
         high_risk = sum(1 for r in rows if r["risk_level"] in ["high","critical"])
         cur.close()
         conn.close()
+
         return jsonify({"total_chats": total, "high_risk_count": high_risk})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# =====================================================
+# MOOD GRAPH
+# =====================================================
 @app.route("/mood-graph/<int:user_id>", methods=["GET"])
 def mood_graph(user_id):
     try:
         conn = get_db()
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cur.execute("SELECT risk_level FROM chats WHERE user_id=%s ORDER BY created_at ASC", (user_id,))
-        rows = cur.fetchall()
-        score_map = {"low":5,"medium":3,"high":2,"critical":1}
-        graph = [{"mood_score": score_map.get(r["risk_level"],5)} for r in rows]
+        chat_rows = cur.fetchall()
+        cur.execute("SELECT score FROM game_scores WHERE user_id=%s ORDER BY created_at ASC", (user_id,))
+        game_rows = cur.fetchall()
         cur.close()
         conn.close()
+
+        graph = []
+        score_map = {"low":5,"medium":3,"high":2,"critical":1}
+        for r in chat_rows:
+            graph.append({"mood_score": score_map.get(r["risk_level"],5)})
+        for g in game_rows:
+            if g["score"] >= 80:
+                graph.append({"mood_score":5})
+            elif g["score"] >= 50:
+                graph.append({"mood_score":3})
+            else:
+                graph.append({"mood_score":1})
+
         return jsonify({"graph": graph})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# =====================================================
+# CHAT HISTORY
+# =====================================================
+@app.route("/history/<int:user_id>", methods=["GET"])
+def chat_history(user_id):
+    try:
+        conn = get_db()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute(
+            "SELECT message, response, risk_level, created_at FROM chats WHERE user_id=%s ORDER BY created_at DESC",
+            (user_id,)
+        )
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        history = []
+        for r in rows:
+            history.append({
+                "message": r["message"],
+                "response": r["response"],
+                "risk_level": r["risk_level"],
+                "created_at": r["created_at"].isoformat()
+            })
+
+        return jsonify({"history": history})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
