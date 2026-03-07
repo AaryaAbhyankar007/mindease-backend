@@ -98,7 +98,7 @@ def is_nonsense(text):
     text = text.strip()
     if len(text) < 2:
         return True
-    if re.fullmatch(r"[a-zA-Z]{50,}", text) and len(set(text)) <= 2:
+    if re.fullmatch(r"[a-zA-Z]{6,}", text) and len(set(text)) <= 2:
         return True
     return False
 
